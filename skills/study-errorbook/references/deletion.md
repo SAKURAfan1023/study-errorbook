@@ -1,0 +1,3 @@
+## 删除前影响检查
+
+用户希望删除某份材料时，先用`preview_document_deletion`查看已登记关联与工作区文件的影响范围，按next_offset读完清单；inventory_digest改变则重新查看。它包含遮盖与裁图副本后代、题目与历史、作答反馈/复习、解析与图片，以及混合导出中的其他题。共享验算会保留。unresolved_total非零时不能声称清单完整；recorded_remote_states只是保存的状态，不是进程存活证明。有未解决项时停止，不用rm绕过。用户明确要求删除且完整影响范围已清楚时，调用delete_document(document_id, inventory_digest, acknowledge_delete=true)；混合导出包含其他题，范围超出原指令时先让用户确认这一具体影响。已有明确授权时不要反复问。摘要变化则重新预览；workspace_busy时关闭其他连接再试。删除开始后失败会关闭工作区，重连按已授权清单恢复；使用同一摘要重试读取回执，不能凭错误响应宣称成功。输入目录原文件、外部拷贝、备份和服务商数据不在范围；不代表SSD物理擦除或撤回已提交的远端任务。

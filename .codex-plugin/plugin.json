@@ -1,0 +1,22 @@
+{
+  "name": "study-errorbook",
+  "version": "0.1.0",
+  "description": "TextIn 文档证据与学习错题工具：供 Agent 解析、取证、归因、练习和导出。",
+  "author": {
+    "name": "SAKURAfan1023"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "学习错题",
+    "shortDescription": "让 Agent 基于原卷证据整理错题和练习",
+    "longDescription": "本地 MCP 与 Skill。保留试卷原件、手写和批改线索，保存可追溯错题、受限代数验算和可打印导出。真实识别效果待样本验证。",
+    "developerName": "SAKURAfan1023",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "整理这份试卷的错题，保留原答案和批改证据。",
+      "根据已保存的错题生成针对性练习。"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

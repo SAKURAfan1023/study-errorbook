@@ -1,0 +1,44 @@
+:root { color-scheme: light; color: #18232b; background: #f1f3f4; }
+* { box-sizing: border-box; }
+body { max-width: 820px; margin: 32px auto; padding: 32px 40px; background: white; font: 16px/1.8 system-ui, sans-serif; }
+h1 { font-size: 28px; margin: 0 0 8px; }
+h2 { font-size: 20px; margin: 0 0 12px; break-after: avoid; }
+h3 { font-size: 16px; margin: 18px 0 4px; break-after: avoid; }
+p { margin: 8px 0; orphans: 3; widows: 3; }
+.rich-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rich-text .katex { white-space: normal; overflow-wrap: normal; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 5px 0; }
+.subtitle, .status, figcaption { color: #53616b; font-size: 13px; }
+.status { margin-bottom: 14px; }
+.question, .exercise, .answer { border-top: 1px solid #bdc7ce; padding-top: 20px; margin-top: 28px; }
+.question, .exercise, .answer, figure { break-inside: avoid; }
+figure { margin: 16px 0; }
+figure img { display: block; max-width: 100%; max-height: 540px; object-fit: contain; object-position: left; }
+.space { height: 48mm; margin-top: 12px; border-bottom: 1px solid #c9cfd3; }
+[data-math-notice] { color: #8a3600; border: 1px solid #d5b692; padding: 8px 12px; font-size: 13px; }
+[hidden] { display: none !important; }
+@page { size: A4; margin: 16mm; }
+@media print {
+  :root { background: white; color: black; }
+  body { max-width: none; margin: 0; padding: 0; font-size: 11pt; }
+  h1 { font-size: 22pt; }
+  h2 { font-size: 15pt; }
+  .question, .exercise, .answer { margin-top: 7mm; padding-top: 5mm; }
+  figure img { max-height: 145mm; }
+  .katex-display { overflow: visible; }
+}
+
+.evidence-links { font-size: 13px; }
+.document-origin { font-size: 13px; overflow-wrap: anywhere; }
+a { color: #24566b; text-underline-offset: 3px; }
+.judgments { border-left: 3px solid #7c929f; padding: 2px 14px; margin: 16px 0; }
+.annotations { padding-left: 22px; }
+.annotations li { break-inside: avoid; margin-bottom: 14px; }
+figure { scroll-margin-top: 20px; }
+figure:target { outline: 2px solid #7c929f; outline-offset: 6px; }
+@media print {
+  /* Long records span pages; keeping a whole question together can create a blank cover. */
+  .question { break-inside: auto; }
+  figure:target { outline: none; }
+  .evidence-open { display: none; }
+}

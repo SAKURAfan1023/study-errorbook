@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "study-errorbook": {
+      "command": "/ABSOLUTE/PATH/TO/study-errorbook/.venv/bin/python",
+      "args": [
+        "-I",
+        "-m",
+        "study_errorbook.server"
+      ],
+      "env": {}
+    }
+  }
+}

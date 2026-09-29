@@ -1,0 +1,45 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+.env
+.env.*
+!.env.example
+data/
+private/
+*.db
+*.db-*
+.DS_Store
+
+# Local visual QA artifacts
+tmp/
+
+# Public source boundary: keep credentials and machine-local evidence private
+/.mcp.json
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.log
+*.sqlite*
+*.db*
+/data/
+/private/
+/output/
+/outputs/
+/tmp/
+/.vscode/
+/.idea/
+/docs/installation.json
+
+# Historical diagnostics stay local; public user guides are explicitly listed.
+/docs/*
+!/docs/distribution.md
+!/docs/manual-review-guide.md
+!/docs/ocr-conflict-user-guide.md
+!/docs/recover-existing-recognition-2026-09-26.md
+!/docs/public-validation.md
