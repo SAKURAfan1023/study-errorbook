@@ -6,9 +6,9 @@
 
 **v0.1.0 开发版，持续更新、完善与迭代中。** 已实现的工具不等于自动判题可靠；OCR、手写擦除、几何理解与真实学习效果仍需原图和人工复核。代码、模拟测试、历史真实 API 调用和当前宿主验收分别记录，见 [发布验证](docs/public-validation.md)。
 
-## npm 本地 client（待发布）
+## npm 本地 client
 
-已确认公开包名 `study-errorbook`，本轮使用薄Node启动器自动管理隔离Python核心，用户无需解压ZIP或手动配Python。首次需联网下载固定运行时；使用说明、缓存/数据边界及宿主接入限制见 [npm client](npm-client/README.md)。仓库市场入口为 `.agents/plugins/marketplace.json`，npm包携带标准插件与固定版本npx启动配置；本地已有仓库时运行 `node scripts/plugin_link.mjs` 取得详情链接，无需复制MCP JSON。npm未发布、桌面窗口未实测，不能宣称快装已通过。
+[study-errorbook@0.1.0](https://www.npmjs.com/package/study-errorbook/v/0.1.0) 已发布，本轮使用薄Node启动器自动管理隔离Python核心，用户无需解压ZIP或手动配Python。首次需联网下载固定运行时；使用说明、缓存/数据边界及宿主接入限制见 [npm client](npm-client/README.md)。仓库市场入口为 `.agents/plugins/marketplace.json`，npm包携带标准插件与固定版本npx启动配置；本地已有仓库时运行 `node scripts/plugin_link.mjs` 取得详情链接，无需复制MCP JSON。已从真实registry验证无认证npx冷启动、35工具发现和离线重启；桌面窗口仍未实测，不能宣称窗口快装已通过。
 
 ## 三句话开始
 

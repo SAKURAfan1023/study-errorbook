@@ -13,7 +13,7 @@
 
 ## npm 本地 client
 
-公开目标为 `study-errorbook@0.1.0`，尚未发布。使用薄 Node 启动器，自动准备固定且校验过的 uv、私有 Python 与锁定依赖，保留现有 Python 核心。数据与配置独立于 npm 缓存。用户无需解压 ZIP 或手写 Python 路径，仍需 Node 22+/npm 和支持本地 stdio 的宿主。补齐 `.agents/plugins/marketplace.json` 的固定npm源、包内标准 `plugin.json`/`mcp.json` 与 `scripts/plugin_link.mjs`：窗口路径不要求复制MCP配置；npm发布和桌面窗口仍待验收。
+[study-errorbook@0.1.0](https://www.npmjs.com/package/study-errorbook/v/0.1.0) 已在官方npm发布。使用薄 Node 启动器，自动准备固定且校验过的 uv、私有 Python 与锁定依赖，保留现有 Python 核心。数据与配置独立于 npm 缓存。用户无需解压 ZIP 或手写 Python 路径，仍需 Node 22+/npm 和支持本地 stdio 的宿主。补齐 `.agents/plugins/marketplace.json` 的固定npm源、包内标准 `plugin.json`/`mcp.json` 与 `scripts/plugin_link.mjs`：窗口路径不要求复制MCP配置；真实registry安装和固定npx冷启动/离线35工具发现已通过；桌面窗口仍待验收。
 
 源码与步骤：[npm client](npm-client/README.md)、[构建](scripts/build_npm_client.py)、[隔离验收](scripts/verify_npm_client.mjs)、[Node 回归](npm-client/test/client.test.mjs)、[输入目录回归](tests/test_client_input_default.py)。
 
@@ -23,7 +23,7 @@
 - 在 PATH 不含 Python/uv 的干净环境安装本地 npm tarball，真实下载私有运行时，通过 35 工具 stdio 合成闭环。
 - 移走 npm 安装目录后，从生成的稳定配置离线启动通过，测试数据保留。
 - tarball 及内层 wheel 审计通过：18 文件，1,102,378 字节；未发现凭据、真实材料、数据库或机器路径。
-- npm publish dry-run 通过，实际发布仍因 ENEEDAUTH 等待发布者自己完成浏览器登录。
+- npm实际发布已由registry核实，包与批准SHA256/SRI一致。全新无npm认证、无全局Python/uv环境运行固定npx命令，35工具发现和离线重启通过；没有调用TextIn。
 - 合成导出的桌面、390px 窄屏、打印和学生 ZIP 离线资源已实际检查；截图来自前一轮 MVP，未将模拟结果当真实 OCR 质量。
 
 ## 本地交付文件
@@ -34,6 +34,8 @@
 - `output/npm-client-20261024/验收记录.md`
 - `output/npm-client-20261024/final-clean/report.json`
 - `output/npm-client-20261024/package-audit.json`
+- `output/npm-release-20261024/发布核对.md`
+- `output/npm-release-20261024/registry-acceptance.json`
 - `output/contest-mvp-20261023/验收记录.md`
 - `output/contest-mvp-20261023/screenshots/`
 
