@@ -1,0 +1,44 @@
+{
+  "name": "study-errorbook",
+  "version": "0.1.0",
+  "description": "Local MCP client with an automatically managed isolated Python core",
+  "type": "module",
+  "bin": {
+    "study-errorbook": "bin/client.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "files": [
+    "bin/client.mjs",
+    "runtime/",
+    "skills/",
+    ".codex-plugin/plugin.json",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "python3 ../scripts/build_npm_client.py",
+    "test": "node --test test/*.test.mjs",
+    "prepublishOnly": "node bin/client.mjs doctor"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SAKURAfan1023/study-errorbook.git",
+    "directory": "npm-client"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "latest"
+  }
+}

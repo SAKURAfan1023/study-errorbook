@@ -43,3 +43,13 @@ tmp/
 !/docs/ocr-conflict-user-guide.md
 !/docs/recover-existing-recognition-2026-09-26.md
 !/docs/public-validation.md
+
+!/docs/mvp.md
+
+# Generated npm runtime payload; prepare with scripts/build_npm_client.py
+/npm-client/runtime/
+/npm-client/skills/
+/npm-client/.codex-plugin/
+/npm-client/LICENSE
+/npm-client/THIRD_PARTY_NOTICES.md
+/npm-client/node_modules/

@@ -10,7 +10,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import AwareDatetime, BaseModel, Field, StrictBool, StrictInt
 
 from .deletion import preview_document_deletion as preview_deletion
-from .models import PracticeFeedback, Region, ReviewPlanChange, StudyRecord
+from .models import CoveragePage, PracticeFeedback, Region, ReviewPlanChange, StudyRecord
 from .service import configured_workspace
 
 
@@ -59,6 +59,26 @@ class ExerciseCheckResult(BaseModel):
 async def workspace_status(ctx: Context) -> dict[str, Any]:
     """检查配置、导入目录和实现边界；runtime_version为服务加载时的包版本，用于核对安装构建，不证明功能或完整性。不显示密钥、不调用外部API。"""
     return ctx.request_context.lifespan_context.status()
+
+
+@mcp.tool(annotations=READ)
+async def read_task_progress(document_id: str, ctx: Context) -> dict[str, Any]:
+    """整理作业时读取页级题号清点、已处理/待定/跳过及下一步；跨会话用list_documents找回ID。只读本地，无OCR。processed来自当前用户纳入/排除状态，不证明已掌握或全卷批改。自由标签可能含提示，独立重练前仅使用read_practice_prompt。"""
+    return ctx.request_context.lifespan_context.read_task_progress(document_id)
+
+
+@mcp.tool(annotations=WRITE)
+async def update_document_coverage(
+    document_id: str, expected_revision: StrictInt, pages: list[CoveragePage], ctx: Context,
+) -> dict[str, Any]:
+    """看过整页原图后保存题号/小题清点。先read_task_progress取得coverage_revision。传入的页完整替换，未传页保留。每页引用本材料整页evidence_id；每题可关联record_id或填写明确skip_reason，均无则待定；不能直接标记已处理。同页不同题号禁止关联同一记录；跨页续题可关联同一记录。空页需note说明观察；无自动切题或完整性保证。"""
+    return ctx.request_context.lifespan_context.update_document_coverage(document_id, expected_revision, pages)
+
+
+@mcp.tool(annotations=PAID)
+async def recover_parse_result(job_id: str, ctx: Context) -> dict[str, Any]:
+    """显式恢复完成异步任务的丢失/损坏缓存：仅GET查询原provider_job_id并重新下载允许主机的结果，不POST、不上传、不创建付费任务。有效缓存直接返回；同步任务无远端ID则拒绝并提示本地备份。遵守查询间隔，HTTP429/40306暂停后须显式resume_job_observation。"""
+    return await ctx.request_context.lifespan_context.recover_parse_result(job_id)
 
 
 @mcp.tool(annotations=WRITE)
@@ -150,7 +170,7 @@ async def resume_job_observation(
     job_id: str, expected_attempt: int, expected_observation_revision: int,
     user_note: str, ctx: Context,
 ) -> dict[str, Any]:
-    """限流40306处理后，仅在用户明确要求时恢复查询原任务，不上传/重新解析。先get_job取得attempt_number和observation_revision，旧任务缺失分别视为1和0。同一版本的恢复决定不会重复应用；再次40306仍停止。user_note保留宿主转述，不能代替用户意见。仍遵守至少3秒查询间隔。"""
+    """限流40306/HTTP429处理后，仅在用户明确要求时恢复查询原任务，不上传/重新解析。先get_job取得attempt_number和observation_revision，旧任务缺失分别视为1和0。同一版本的恢复决定不会重复应用；再次限流仍停止。user_note保留宿主转述，不能代替用户意见。仍遵守至少3秒查询间隔。"""
     return await ctx.request_context.lifespan_context.resume_job_observation(
         job_id, expected_attempt, expected_observation_revision, user_note
     )
@@ -190,9 +210,14 @@ async def read_evidence(document_id: str, region: Region, ctx: Context) -> list:
 
 
 @mcp.tool(annotations=PAID, structured_output=False)
-async def make_clean_copy(evidence_id: str, ctx: Context) -> list:
-    """仅在用户需要空白重练题时付费调用 TextIn 擦除已保存的证据切图。原件不变，结果必须人工/视觉检查题干损伤；重复调用不重提交。"""
-    result = await ctx.request_context.lifespan_context.make_clean_copy(evidence_id)
+async def make_clean_copy(
+    evidence_id: str, ctx: Context, expected_attempt: StrictInt | None = None,
+    acknowledge_resubmission: StrictBool = False, user_note: str = "",
+) -> list:
+    """仅在用户需要空白重练题时付费调用 TextIn 擦除已保存的证据切图。原件不变，结果必须人工/视觉检查题干损伤；默认重复调用只读原尝试。失败/提交未知须用户明确同意可能重复计费后，携expected_attempt、acknowledge_resubmission=true及user_note显式重提；保留历史，不自动重试。"""
+    result = await ctx.request_context.lifespan_context.make_clean_copy(
+        evidence_id, expected_attempt, acknowledge_resubmission, user_note
+    )
     content = [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
     if result["status"] == "completed":
         content.append(
@@ -360,7 +385,7 @@ async def read_practice_feedback(
 async def export_errorbook(
     record_ids: list[str], ctx: Context, include_drafts: bool = False
 ) -> dict[str, Any]:
-    """导出本地可打印HTML错题本、学生变式题册与独立答案册及原卷证据图。选了clean_evidence_ids时额外输出original-practice.html原题重练册。practice_bundle_path是仅练习材料的ZIP，含练习页、所选净题图与离线资源，不含答案册/错题本/原卷图；给学生材料时使用此包并完整解压，不要复制含答案的整个导出目录。题干与净题图仍需检查提示残留。默认只导出用户纳入、练习有适用验算/用户复核、净题已按当前图片复核的记录；先read_study_record查看exercise_validation和clean_copy_validation。include_drafts允许带待复核标记的草稿。证据明细在manifest_path。完整导出目录供留档，含答案和原作答。不会自动发布或发送。"""
+    """导出本地可打印HTML错题本、学生变式题册与独立答案册及原卷证据图；有历史作答时另附feedback.html反馈报告（最近20次）。选了clean_evidence_ids时额外输出original-practice.html原题重练册。practice_bundle_path是仅练习材料的ZIP，含练习页、所选净题图与离线资源，不含答案册/错题本/原卷图；给学生材料时使用此包并完整解压，不要复制含答案的整个导出目录。题干与净题图仍需检查提示残留。默认只导出用户纳入、练习有适用验算/用户复核、净题已按当前图片复核的记录；先read_study_record查看exercise_validation和clean_copy_validation。include_drafts允许带待复核标记的草稿。证据明细在manifest_path。完整导出目录供留档，含答案和原作答。不会自动发布或发送。"""
     return ctx.request_context.lifespan_context.export_errorbook(record_ids, include_drafts)
 
 

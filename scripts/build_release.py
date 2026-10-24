@@ -40,7 +40,7 @@ def main():
         shutil.copy2(root / "scripts" / name, bundle / name)
     shutil.copy2(root / "README.md", bundle / "README.md")
     (bundle / "docs").mkdir()
-    for name in ('distribution.md', 'manual-review-guide.md', 'ocr-conflict-user-guide.md', 'recover-existing-recognition-2026-09-26.md', 'public-validation.md'):
+    for name in ('distribution.md', 'mvp.md', 'manual-review-guide.md', 'ocr-conflict-user-guide.md', 'recover-existing-recognition-2026-09-26.md', 'public-validation.md'):
         shutil.copy2(root / "docs" / name, bundle / "docs" / name)
     for name in ("LICENSE", "USE_POLICY.md", "THIRD_PARTY_NOTICES.md", "SECURITY.md", "CONTRIBUTING.md"):
         shutil.copy2(root / name, bundle / name)

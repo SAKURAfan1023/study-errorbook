@@ -28,7 +28,14 @@ from PIL import Image, ImageOps
 
 from .algebra import check_answer
 from .deletion import execute_deletion, initialize_deletion, recover_deletions
-from .models import DomainError, PracticeFeedback, Region, ReviewPlanChange, StudyRecord
+from .models import (
+    CoveragePage,
+    DomainError,
+    PracticeFeedback,
+    Region,
+    ReviewPlanChange,
+    StudyRecord,
+)
 from .textin import ERASE_ENDPOINT, ERASE_PARAMS, PARSE_CONFIG, VLM_CONFIG, TextIn
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -358,6 +365,104 @@ class Workspace:
             "note": "识别标签与原图为证据；拆题、归因由宿主 Agent 完成，保存后默认待复核。",
         }
 
+    @_write_transaction
+    def update_document_coverage(
+        self, document_id: str, expected_revision: int, pages: list[CoveragePage],
+    ) -> dict:
+        """Merge explicitly inspected pages; all other progress is derived from saved records."""
+        doc = self._get("document", document_id)
+        if type(expected_revision) is not int or expected_revision != doc.get("coverage_revision", 0):
+            raise DomainError("coverage_conflict", "题号对应已变化；先read_task_progress，保留其他页后再修改。")
+        if not 1 <= len(pages) <= 20 or len({p.page for p in pages}) != len(pages):
+            raise DomainError("coverage_pages", "每次更新1–20个不重复页号。")
+        coverage = {p["page"]: p for p in doc.get("coverage", [])}
+        for page in pages:
+            evidence = self._get("evidence", page.evidence_id)
+            if (page.page > doc["pages"] or evidence["document_id"] != document_id
+                    or evidence["region"] != {"page": page.page, "box": [0, 0, 1, 1]}):
+                raise DomainError("coverage_evidence", "题号清点必须引用本材料对应整页原图证据。")
+            self._read_evidence_image(page.evidence_id)
+            record_ids = [q.record_id for q in page.questions if q.record_id]
+            if len(record_ids) != len(set(record_ids)):
+                raise DomainError("coverage_record_duplicate", "同一页的不同题号不能关联同一条记录；请逐题核对。跨页续题可在不同页关联同一记录。")
+            for question in page.questions:
+                if question.record_id:
+                    record = self._get("record", question.record_id)
+                    if record["record"]["document_id"] != document_id:
+                        raise DomainError("coverage_record", "关联记录必须属于本材料；跨页续题可在各页关联同一记录。")
+            coverage[page.page] = page.model_dump()
+        if sum(len(p["questions"]) for p in coverage.values()) > 200:
+            raise DomainError("coverage_size", "单份材料最多清点200个题号/小题；请缩小处理范围。")
+        doc.update(coverage_revision=expected_revision + 1,
+                   coverage=[coverage[n] for n in sorted(coverage)])
+        self._put("document", document_id, doc)
+        return self.read_task_progress(document_id)
+
+    def read_task_progress(self, document_id: str) -> dict:
+        doc = self._get("document", document_id)
+        records = {r["id"]: r for r in self._all("record") if r["record"]["document_id"] == document_id}
+        pages, linked = [], set()
+        has_duplicate_mapping = False
+        counts = {"processed": 0, "pending": 0, "skipped": 0}
+        coverage = {p["page"]: p for p in doc.get("coverage", [])}
+        for number in range(1, doc["pages"] + 1):
+            page = coverage.get(number)
+            items = []
+            record_ids = [q["record_id"] for q in page["questions"] if q.get("record_id")] if page else []
+            duplicate_ids = {identifier for identifier in record_ids if record_ids.count(identifier) > 1}
+            has_duplicate_mapping |= bool(duplicate_ids)
+            linked.update(duplicate_ids & records.keys())
+            for question in page["questions"] if page else []:
+                record = records.get(question.get("record_id")) if question.get("record_id") not in duplicate_ids else None
+                state = "skipped" if question["skip_reason"].strip() else "pending"
+                next_action = "核对原图并保存本题草稿"
+                if record:
+                    linked.add(record["id"])
+                    state = "processed" if record["review_status"] in {"include", "exclude"} else "pending"
+                    if state == "pending":
+                        next_action = "请用户复核当前版本"
+                    elif record["review_status"] == "exclude":
+                        next_action = "已排除；保留依据"
+                    elif not record["record"].get("analysis"):
+                        next_action = "根据可见错误补充分析；正确题无需补救练习"
+                    elif not record["record"]["exercises"]:
+                        next_action = "根据已确认错因生成变式"
+                    elif any(not item["answer_ready"] for item in self._exercise_validation(record)):
+                        next_action = "校验或复核变式答案"
+                    else:
+                        attempts = self.read_practice_history(record["id"], limit=1)["items"]
+                        current = [a for a in attempts if a["source_revision"] == record["revision"]]
+                        next_action = ("开始重练：仅展示中性题面" if not current else
+                                       "核对独立作答并保存反馈" if not current[0]["feedback_revision"] else
+                                       "导出材料：学生包与答案册分别交付")
+                if state == "skipped":
+                    next_action = "已跳过：" + question["skip_reason"]
+                if question.get("record_id") in duplicate_ids:
+                    state = "pending"
+                    next_action = "同页多个题号重复关联同一记录；请核对原图并更正题号对应"
+                counts[state] += 1
+                items.append({**question, "status": state, "next_action": next_action,
+                              "record_revision": record["revision"] if record else None})
+            pages.append({"page": number, "inventory_status": "inspected" if page else "uninspected",
+                          "evidence_id": page["evidence_id"] if page else None,
+                          "note": page["note"] if page else "", "questions": items})
+        uninspected = [p["page"] for p in pages if p["inventory_status"] == "uninspected"]
+        unlinked = sorted(set(records) - linked)
+        inventory_complete = not uninspected and not unlinked and not has_duplicate_mapping
+        next_action = ("查看整页原图并保存题号清点" if uninspected else
+                       "把未关联记录补入题号清点" if unlinked else
+                       next((q["next_action"] for p in pages for q in p["questions"] if q["status"] == "pending"),
+                            next((q["next_action"] for p in pages for q in p["questions"]
+                                  if q["status"] == "processed" and records.get(q.get("record_id"), {}).get("review_status") == "include"),
+                                 "题号清点已结束；已跳过或排除题不代表已生成练习")))
+        jobs = [{k: j.get(k) for k in ("id", "status", "mode", "attempt_number", "poll_error")}
+                for j in self._all("job") if j["document_id"] == document_id]
+        return {"document_id": document_id, "coverage_revision": doc.get("coverage_revision", 0),
+                "pages": pages, "counts": counts, "inventory_complete": inventory_complete,
+                "unlinked_record_ids": unlinked, "jobs": jobs, "next_action": next_action,
+                "organization_complete": inventory_complete and counts["pending"] == 0,
+                "scope": "仅为宿主核图清点及保存状态；processed表示用户已纳入或排除，不证明OCR完整、全卷批改或掌握。跨页续题按页计数。"}
+
     def list_input_files(self, offset: int = 0, limit: int = 20) -> dict:
         """Enumerate inbox metadata; listing never reads or imports document contents."""
         if type(offset) is not int or type(limit) is not int:
@@ -484,8 +589,11 @@ class Workspace:
 
     def list_documents(self, offset: int = 0, limit: int = 20) -> dict:
         self._page_bounds(offset, limit)
-        items = self._all("document")
-        return {"items": items[offset : offset + limit], "total": len(items)}
+        documents = self._all("document")
+        # Keep discovery small; detailed inventories belong to read_task_progress.
+        items = [{k: v for k, v in doc.items() if k != "coverage"}
+                 for doc in documents[offset : offset + limit]]
+        return {"items": items, "total": len(documents)}
 
     def list_parse_jobs(self, document_id: str, offset: int = 0, limit: int = 20) -> dict:
         """Find saved handles without source-file access, polling, or resubmission."""
@@ -750,7 +858,7 @@ class Workspace:
             job["status"] = (
                 "submission_unknown"
                 if error.code in {"network_uncertain", "invalid_response", "response_too_large"}
-                or error.code.startswith("http_5")
+                or error.code.startswith("http_5") or error.code == "cache_write_failed"
                 else "failed"
             )
             job["error"] = {"code": error.code, "message": error.message}
@@ -826,9 +934,35 @@ class Workspace:
     def _cache_parse_result(self, job: dict, doc: dict, data: dict):
         # Both remote paths must persist an immutable result before reporting completion.
         target = self.root / doc["id"] / (job["id"] + ".json")
-        temporary = target.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(target)
+        binary = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        if len(binary) > MAX_CACHE_BYTES:
+            raise DomainError("response_too_large", "缓存超过64MiB；未写入。")
+        if Path(doc["id"]).name != doc["id"] or Path(job["id"]).name != job["id"]:
+            raise DomainError("cache_path", "缓存标识异常。")
+        # Anchor both writes and rename to the document directory, never a symlink target.
+        temporary_name = ".result-" + uuid.uuid4().hex + ".tmp"
+        try:
+            root_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                folder_fd = os.open(doc["id"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+            finally:
+                os.close(root_fd)
+            try:
+                fd = os.open(temporary_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=folder_fd)
+                try:
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(binary)
+                    os.replace(temporary_name, target.name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+                finally:
+                    try:
+                        os.unlink(temporary_name, dir_fd=folder_fd)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                os.close(folder_fd)
+        except OSError:
+            raise DomainError("cache_write_failed", "本地缓存写入失败；保留原任务，不自动重新上传。") from None
         if job.get("mode") == "vlm_sync":
             job.update(status="completed", result_path=str(target), result_format="textin_vlm_v4",
                        response_version=data.get("version"),
@@ -851,13 +985,46 @@ class Workspace:
             job.setdefault("observation_revision", 0)
             if not acquired:
                 return {**job, "poll_after_seconds": 3}
-            if job["status"] in {"failed", "submission_unknown", "completed", "partial"}:
+            if job["status"] in {"failed", "submission_unknown"}:
                 return job
-            if job.get("poll_error", {}).get("code") == "textin_40306":
+            if job.get("poll_error", {}).get("code") in {"textin_40306", "http_429"}:
                 return {
                     **job,
-                    "next_action": "先联系服务商处理限流；用户明确要求后，携当前版本调用resume_job_observation继续查询原任务。",
+                    "next_action": "停止查询并处理限流（40306先联系服务商）；用户明确要求后，携当前版本调用resume_job_observation继续查询原任务。",
                 }
+            if job["status"] in {"completed", "partial"}:
+                return job
+            return await self._observe_job(job)
+
+    async def recover_parse_result(self, job_id: str) -> dict:
+        self._get("job", job_id)
+        async with self._remote_action("job", job_id) as acquired:
+            if not acquired:
+                raise DomainError("action_busy", "另一会话正在处理该任务；先get_job。")
+            job = self._get("job", job_id)
+            if job["status"] not in {"completed", "partial"}:
+                raise DomainError("recovery_state", "仅完成任务可恢复缓存；未重新提交。")
+            try:
+                self._parsed_result(job_id)
+                return {**job, "cached": True}
+            except DomainError as error:
+                if error.code != "cached_result_unavailable":
+                    raise
+            if job.get("poll_error", {}).get("code") in {"textin_40306", "http_429"}:
+                raise DomainError("recovery_paused", "恢复查询因限流暂停；处理后按当前版本显式resume_job_observation，不要重提。")
+            if not job.get("provider_job_id") or job.get("mode", "paid_async") != "paid_async":
+                raise DomainError("recovery_unavailable", "此任务无可查询的异步ID；从可信本地备份恢复缓存或按原图转录，不重新上传。")
+            if not self.api.configured:
+                raise DomainError("credentials_missing", "恢复原任务GET查询需要TextIn凭据；未上传。")
+            # Validate the anchored destination before making the GET request; do not follow links.
+            target = self.root / job["document_id"] / (job["id"] + ".json")
+            if (Path(job["document_id"]).name != job["document_id"]
+                    or Path(job["id"]).name != job["id"] or target.parent.is_symlink()
+                    or target.is_symlink() or (target.exists() and not target.is_file())
+                    or target.with_suffix(".tmp").exists() or target.with_suffix(".tmp").is_symlink()):
+                raise DomainError("recovery_path", "缓存目标路径异常；先检查本地文件，不发起网络请求。")
+            job["cache_recovery_pending"] = True
+            self._put("job", job_id, job)
             return await self._observe_job(job)
 
     async def resume_job_observation(
@@ -875,11 +1042,11 @@ class Workspace:
             if expected_attempt != job.get("attempt_number", 1) or expected_observation_revision != revision:
                 raise DomainError("observation_conflict", "任务或查询版本已变化；先get_job，不要自动更新版本后恢复。")
             if (
-                job["status"] not in {"pending", "in_progress"}
+                (job["status"] not in {"pending", "in_progress"} and not job.get("cache_recovery_pending"))
                 or not job.get("provider_job_id")
-                or job.get("poll_error", {}).get("code") != "textin_40306"
+                or job.get("poll_error", {}).get("code") not in {"textin_40306", "http_429"}
             ):
-                raise DomainError("resume_state", "仅有远端ID且因40306暂停查询的运行中任务可恢复。")
+                raise DomainError("resume_state", "仅有远端ID且因40306/HTTP429暂停查询的任务可恢复。")
             if not self.api.configured:
                 raise DomainError("credentials_missing", "先配置TextIn凭据；暂停状态保持不变。")
             job["last_observation_resume"] = {
@@ -903,10 +1070,13 @@ class Workspace:
         self._put("job", job["id"], job)
         try:
             status = await self.api.poll(job["provider_job_id"])
+            if job.get("cache_recovery_pending") and status["status"] != "completed":
+                raise DomainError("recovery_provider_unavailable", "原完成任务暂未返回可恢复结果；本地完成状态保留，不重提。")
             if status["status"] == "completed":
                 data = await self.api.result(status.get("result_url", ""))
                 doc = self._get("document", job["document_id"])
                 self._cache_parse_result(job, doc, data)
+                job.pop("cache_recovery_pending", None)
             elif status["status"] == "failed":
                 job.update(
                     status="failed",
@@ -968,7 +1138,7 @@ class Workspace:
             raise DomainError(
                 "cached_result_unavailable",
                 "本地解析缓存缺失、路径异常、不是普通文件、超过64MiB或结构损坏；原任务状态保留，未重新上传。"
-                "请核对该任务的本地缓存或可信备份；恢复后用同一job_id读取。"
+                "有远端异步ID时可显式recover_parse_result仅GET恢复原任务；否则核对可信本地备份。恢复后用同一job_id读取。"
                 "不要自动重提解析或切换模式。",
             ) from None
         return job, data
@@ -1373,7 +1543,10 @@ class Workspace:
                 receipt["archive_error"] = "response_not_saved"
         return receipt
 
-    async def make_clean_copy(self, evidence_id: str) -> dict:
+    async def make_clean_copy(
+        self, evidence_id: str, expected_attempt: int | None = None,
+        acknowledge_resubmission: bool = False, user_note: str = "",
+    ) -> dict:
         evidence = self._get("evidence", evidence_id)
         async with self._remote_action("erase", evidence_id) as acquired:
             if not acquired:
@@ -1381,8 +1554,18 @@ class Workspace:
             existing = self.db.execute(
                 "SELECT body FROM objects WHERE kind='erase' AND id=?", (evidence_id,)
             ).fetchone()
-            if existing:
-                return {**json.loads(existing[0]), "cached": True}
+            previous = json.loads(existing[0]) if existing else None
+            if expected_attempt is not None:
+                if (acknowledge_resubmission is not True or not user_note.strip() or len(user_note) > 2000):
+                    raise DomainError("retry_confirmation", "须转述用户明确同意再次擦除及可能重复计费，1–2000字符。")
+                if not previous or expected_attempt != previous.get("attempt_number", 1):
+                    raise DomainError("attempt_conflict", "擦除尝试已变化；先用不带重提参数的make_clean_copy读取，不自动重提。")
+                if previous["status"] not in {"failed", "submission_unknown"}:
+                    raise DomainError("retry_state", "仅失败或提交未知的擦除可以显式重提。")
+            elif previous:
+                return {**previous, "cached": True}
+            elif acknowledge_resubmission or user_note:
+                raise DomainError("retry_confirmation", "重提必须提供原尝试编号。")
             if not self.api.configured:
                 raise DomainError("credentials_missing", "配置 TextIn 凭据后才能擦除；原始证据未更改。")
             source = self._read_evidence_image(evidence_id)
@@ -1390,6 +1573,13 @@ class Workspace:
                       "submitted_source_sha256": hashlib.sha256(source).hexdigest(),
                       "submitted_source_bytes": len(source), "submitted_at": time.time(),
                       "endpoint": ERASE_ENDPOINT, "parameters": ERASE_PARAMS.copy()}
+            action["attempt_number"] = previous.get("attempt_number", 1) + 1 if previous else 1
+            if previous:
+                action["attempt_history"] = [*previous.get("attempt_history", []),
+                    {k: v for k, v in previous.items() if k != "attempt_history"}]
+                if len(action["attempt_history"]) > 20:
+                    raise DomainError("retry_limit", "本证据已达20次历史尝试上限；先人工排查，不再上传。")
+                action["retry_request"] = {"user_note": user_note.strip(), "source": "host_agent_reported"}
             self._put("erase", evidence_id, action)
             receipt = {}
             try:
@@ -1422,7 +1612,7 @@ class Workspace:
                 raise
             finally:
                 action["provider_receipt"] = self._archive_response(
-                    evidence["document_id"], evidence_id + "-erase-response.bin", receipt
+                    evidence["document_id"], evidence_id + (f"-attempt-{action['attempt_number']}" if previous else "") + "-erase-response.bin", receipt
                 )
                 self._put("erase", evidence_id, action)
             return action
@@ -2198,7 +2388,7 @@ class Workspace:
             manifest_temp.replace(folder / "manifest.json")
             escaped = html.escape
             shutil.copytree(Path(__file__).parent / "assets", folder / "assets")
-            notebook, practice, answers, original_practice, exported_records = [], [], [], [], []
+            notebook, practice, answers, original_practice, exported_records, feedback_sections = [], [], [], [], [], []
             for record_index, saved in enumerate(records, 1):
                 item = saved["record"]
                 provenance = self._export_document_provenance(item["document_id"])
@@ -2222,7 +2412,7 @@ class Workspace:
                     )
 
                 display_label = f"第{record_index}题"
-                heading = f"<h2>{display_label} · {escaped(item['question_label'])} · {review_label}</h2>"
+                heading = f"<h2>{display_label} · {escaped(item['question_label'])}</h2><p class='status'>{review_label}</p>"
                 notebook.append('<section class="question">' + heading + f'<p class="rich-text">{escaped(item["stem"])}</p>')
                 answer_text = item["student_answer"] or "未记录作答；不能据此认定未作答。"
                 notebook.append(f'<h3>作答转录（录入）</h3><p class="rich-text">{escaped(answer_text)}</p>')
@@ -2326,6 +2516,28 @@ class Workspace:
                                          "document_id": item["document_id"], "document_provenance": provenance,
                                          "evidence": exported_evidence, "clean_copies": exported_clean})
                 notebook.append("</section>")
+                history = self.read_practice_history(saved["id"], limit=20, include_details=True)
+                for attempt in reversed(history["items"]):
+                    latest = self.read_practice_feedback(attempt["id"], limit=1)["items"]
+                    assistance_label = {"independent": "独立完成", "hinted": "用过提示",
+                                        "solution_seen": "看过解析", "unknown": "未说明"}.get(attempt["assistance"], "未说明")
+                    feedback_sections.append(
+                        f'<section class="question"><h2>{display_label} · 再次作答</h2>'
+                        f'<p class="status">题目版本 {attempt["source_revision"]} · 帮助情况：{assistance_label}</p>'
+                        f'<h3>当时题面</h3><p class="rich-text">{escaped(attempt.get("source_snapshot", {}).get("prompt", "旧记录缺少快照"))}</p>'
+                        f'<h3>实际作答</h3><p class="rich-text">{escaped(attempt["response"])}</p>')
+                    if latest:
+                        feedback = latest[0]
+                        feedback_sections.append(
+                            f'<div class="judgments"><p>Agent判断：{verdicts[feedback["agent_verdict"]]}</p>'
+                            f'<p>用户意见：{verdicts.get(feedback["user_verdict"], "未报告")}</p></div>'
+                            f'<h3>反馈与依据</h3><p class="rich-text">{escaped(feedback["feedback"])}</p>'
+                            f'<h3>下一步</h3><p class="rich-text">{escaped(feedback["next_step"])}</p>')
+                    else:
+                        feedback_sections.append('<p class="status">待反馈；本工具未自动判分。</p>')
+                    feedback_sections.append('</section>')
+                if history["next_before"] is not None:
+                    feedback_sections.append('<p class="status">本报告仅展示最近20次作答；完整历史保留在本地。</p>')
                 for index, exercise in enumerate(item["exercises"], 1):
                     label = f"{display_label} / 练习 {index}"
                     validation = validation_by_record[saved["id"]][index - 1]
@@ -2336,7 +2548,7 @@ class Workspace:
                         f"<section class='exercise'><h2>{label}</h2><p class='status'>{exercise_label}</p><p class='rich-text'>{escaped(exercise['prompt'])}</p><div class='space' aria-label='答题区域'></div></section>"
                     )
                     answers.append(
-                        f"<section class='answer'><h2>{label} · {escaped(item['question_label'])}</h2><p class='status'>{exercise_label}</p><p class='rich-text'>{escaped(exercise['answer'])}</p><p class='rich-text'>{escaped(exercise['explanation'])}</p>"
+                        f"<section class='answer'><h2>{label} · {escaped(item['question_label'])}</h2><p class='status'>{exercise_label}</p><h3>参考答案</h3><p class='rich-text'>{escaped(exercise['answer'])}</p><p class='rich-text'>{escaped(exercise['explanation'])}</p>"
                     )
                     answers.append(f'<p class="rich-text">练习目的：{escaped(exercise["targets_error"])}</p>')
                     check_status = validation["check_status"]
@@ -2361,6 +2573,8 @@ class Workspace:
             ]
             if original_practice:
                 pages.append(("original-practice.html", "原题重练", original_practice))
+            if feedback_sections:
+                pages.append(("feedback.html", "练习反馈", feedback_sections))
             for filename, title, sections in pages:
                 body = "".join(sections) if sections else "<p>尚无已保存的练习。</p>"
                 page = (
@@ -2370,10 +2584,10 @@ class Workspace:
                     '<link rel="stylesheet" href="assets/export.css">'
                     '<script defer src="assets/katex/katex.min.js"></script>'
                     '<script defer src="assets/katex/contrib/auto-render.min.js"></script>'
-                    '<script defer src="assets/export.js"></script></head><body><h1>' + title + '</h1>'
+                    '<script defer src="assets/export.js"></script></head><body><header><p class="eyebrow">学习错题 / STUDY NOTES</p><h1>' + title + '</h1>'
                     '<p class="subtitle">学习辅助材料 · 请按各题复核状态使用</p>'
                     f'<p class="subtitle">资料编号：{escaped(export_id)} · 核对答案时请使用相同编号的答案册。</p>'
-                    '<p data-math-notice role="status">公式尚未排版；若此提示持续显示，请检查同目录assets文件是否完整。</p>'
+                    '</header><p data-math-notice role="status">公式尚未排版；若此提示持续显示，请检查同目录assets文件是否完整。</p>'
                     + body + '</body></html>'
                 )
                 (folder / filename).write_text(page, encoding="utf-8")
@@ -2431,7 +2645,7 @@ def configured_workspace() -> Workspace:
         for key in ("STUDY_DATA_DIR", "STUDY_INPUT_ROOT", "TEXTIN_APP_ID", "TEXTIN_SECRET_CODE")
     }
     root = Path(settings["STUDY_DATA_DIR"] or Path.home() / ".local/share/study-errorbook")
-    input_root = settings["STUDY_INPUT_ROOT"]
+    input_root = settings["STUDY_INPUT_ROOT"] or os.environ.get("STUDY_CLIENT_INPUT_ROOT")
     return Workspace(
         root,
         Path(input_root) if input_root else None,

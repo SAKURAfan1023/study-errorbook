@@ -1,0 +1,22 @@
+{
+  "version": "0.12.17",
+  "source": "https://github.com/astral-sh/uv/releases/tag/0.12.17",
+  "assets": {
+    "aarch64-apple-darwin": {
+      "name": "uv-aarch64-apple-darwin.tar.gz",
+      "sha256": "85f00cbdc6dd3e97eba4c31b4d014375a9fdfe8f570023b84e5102fc3456896b"
+    },
+    "x86_64-apple-darwin": {
+      "name": "uv-x86_64-apple-darwin.tar.gz",
+      "sha256": "8dcf05a8c809bb3c471d2b614788ba27a6e41298fc8c31ac84b5f4339fd468e5"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "name": "uv-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "d636d1b678e9e7f367ecb22b46bd1cabbed234d6bc3b4d96365d2b507f72f86c"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "name": "uv-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "fa82fd8dde8e8eefdecada6aa0889666556cfceb690d06e0c3bca49eb3070a63"
+    }
+  }
+}

@@ -22,6 +22,33 @@ class Region(Input):
         return self
 
 
+class CoverageQuestion(Input):
+    question_label: str = Field(min_length=1, max_length=100)
+    record_id: str | None = Field(default=None, min_length=1, max_length=100)
+    skip_reason: str = Field(default="", max_length=400)
+
+    @model_validator(mode="after")
+    def exclusive_disposition(self):
+        if not self.question_label.strip() or (self.record_id and self.skip_reason.strip()):
+            raise ValueError("use a real label and either a linked record or a skip reason")
+        return self
+
+
+class CoveragePage(Input):
+    page: StrictInt = Field(ge=1, le=20)
+    # A whole-page evidence ID records the host's visual inventory, not OCR completeness.
+    evidence_id: str = Field(min_length=1, max_length=100)
+    questions: list[CoverageQuestion] = Field(default_factory=list, max_length=100)
+    note: str = Field(default="", max_length=400)
+
+    @model_validator(mode="after")
+    def unique_inventory(self):
+        labels = [q.question_label for q in self.questions]
+        if len(set(labels)) != len(labels) or (not labels and not self.note.strip()):
+            raise ValueError("labels must be unique per page; an empty page requires an observation")
+        return self
+
+
 class Annotation(Input):
     text: str = Field(max_length=4000)
     kind: Literal["answer", "correction", "tick", "cross", "circle", "score", "other"]

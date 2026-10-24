@@ -1,44 +1,56 @@
-:root { color-scheme: light; color: #18232b; background: #f1f3f4; }
+:root { color-scheme: light; color: #24323b; background: #eef2f2; --ink: #173f46; --muted: #5d7076; --line: #d7e1e1; }
 * { box-sizing: border-box; }
-body { max-width: 820px; margin: 32px auto; padding: 32px 40px; background: white; font: 16px/1.8 system-ui, sans-serif; }
-h1 { font-size: 28px; margin: 0 0 8px; }
-h2 { font-size: 20px; margin: 0 0 12px; break-after: avoid; }
-h3 { font-size: 16px; margin: 18px 0 4px; break-after: avoid; }
+body { max-width: 900px; margin: 36px auto; padding: 48px 56px; background: #fff; font: 16px/1.85 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; box-shadow: 0 12px 48px #173f460a; }
+header { padding-bottom: 26px; border-bottom: 3px solid var(--ink); margin-bottom: 30px; }
+.eyebrow { color: var(--ink); font-size: 11px; font-weight: 700; letter-spacing: .16em; margin: 0 0 14px; }
+h1 { color: var(--ink); font-size: 34px; line-height: 1.3; letter-spacing: -.02em; margin: 0 0 18px; }
+h2 { color: var(--ink); font-size: 20px; line-height: 1.6; margin: 0 0 16px; break-after: avoid; overflow-wrap: anywhere; }
+h3 { font-size: 14px; color: var(--ink); margin: 24px 0 6px; break-after: avoid; }
 p { margin: 8px 0; orphans: 3; widows: 3; }
 .rich-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rich-text .katex { white-space: normal; overflow-wrap: normal; }
-.katex-display { overflow-x: auto; overflow-y: hidden; padding: 5px 0; }
-.subtitle, .status, figcaption { color: #53616b; font-size: 13px; }
-.status { margin-bottom: 14px; }
-.question, .exercise, .answer { border-top: 1px solid #bdc7ce; padding-top: 20px; margin-top: 28px; }
-.question, .exercise, .answer, figure { break-inside: avoid; }
-figure { margin: 16px 0; }
-figure img { display: block; max-width: 100%; max-height: 540px; object-fit: contain; object-position: left; }
-.space { height: 48mm; margin-top: 12px; border-bottom: 1px solid #c9cfd3; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 8px 0; }
+.subtitle, .status, figcaption { color: var(--muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.status { display: block; border-left: 2px solid #87ada9; padding-left: 10px; margin-bottom: 18px; }
+.question, .exercise, .answer { border-top: 1px solid var(--line); padding-top: 30px; margin-top: 36px; }
+header + [hidden] + section { border-top: none; padding-top: 0; }
+.exercise, .answer, figure { break-inside: avoid; }
+figure { margin: 22px 0; scroll-margin-top: 20px; }
+figure img { display: block; max-width: 100%; max-height: 540px; object-fit: contain; object-position: left; border: 1px solid var(--line); padding: 8px; background: #fff; }
+figcaption { padding-top: 8px; }
+.space { height: 48mm; margin-top: 22px; border: 1px solid var(--line); border-radius: 6px; background: repeating-linear-gradient(transparent, transparent 31px, #e7eded 32px); }
+.space::before { content: "答题区域 · 请写出关键步骤"; display: block; padding: 6px 12px; font-size: 11px; color: var(--muted); background: #f4f7f7; }
 [data-math-notice] { color: #8a3600; border: 1px solid #d5b692; padding: 8px 12px; font-size: 13px; }
 [hidden] { display: none !important; }
-@page { size: A4; margin: 16mm; }
-@media print {
-  :root { background: white; color: black; }
-  body { max-width: none; margin: 0; padding: 0; font-size: 11pt; }
-  h1 { font-size: 22pt; }
-  h2 { font-size: 15pt; }
-  .question, .exercise, .answer { margin-top: 7mm; padding-top: 5mm; }
-  figure img { max-height: 145mm; }
-  .katex-display { overflow: visible; }
-}
-
-.evidence-links { font-size: 13px; }
-.document-origin { font-size: 13px; overflow-wrap: anywhere; }
-a { color: #24566b; text-underline-offset: 3px; }
-.judgments { border-left: 3px solid #7c929f; padding: 2px 14px; margin: 16px 0; }
+.evidence-links, .document-origin { font-size: 12px; overflow-wrap: anywhere; }
+a { color: #196777; text-underline-offset: 3px; }
+.judgments { border-left: 3px solid #87ada9; background: #f3f7f7; padding: 12px 18px; margin: 22px 0; font-size: 14px; }
 .annotations { padding-left: 22px; }
 .annotations li { break-inside: avoid; margin-bottom: 14px; }
-figure { scroll-margin-top: 20px; }
-figure:target { outline: 2px solid #7c929f; outline-offset: 6px; }
+figure:target { outline: 2px solid #507b81; outline-offset: 6px; }
+@media (max-width: 600px) {
+  body { margin: 0; padding: 28px 20px; font-size: 15px; box-shadow: none; }
+  h1 { font-size: 29px; }
+  h2 { font-size: 18px; }
+  header { margin-bottom: 22px; }
+  .question, .exercise, .answer { margin-top: 28px; padding-top: 24px; }
+}
+@page { size: A4; margin: 16mm; }
 @media print {
-  /* Long records span pages; keeping a whole question together can create a blank cover. */
+  :root { background: white; color: black; --ink: #111; --muted: #444; --line: #bbb; }
+  body { max-width: none; margin: 0; padding: 0; font-size: 11pt; box-shadow: none; }
+  header { padding-bottom: 5mm; margin-bottom: 6mm; border-bottom-width: 1pt; }
+  h1 { font-size: 24pt; margin-bottom: 4mm; }
+  h2 { font-size: 14pt; }
+  h3 { font-size: 11pt; margin-top: 5mm; }
+  .eyebrow { font-size: 8pt; }
+  .question, .exercise, .answer { margin-top: 7mm; padding-top: 5mm; }
   .question { break-inside: auto; }
+  figure img { max-height: 145mm; }
+  .katex-display { overflow: visible; }
+  .space { border-radius: 0; background: none; border-bottom-color: #777; }
+  .space::before { background: none; }
+  .judgments { background: none; padding-top: 0; padding-bottom: 0; }
   figure:target { outline: none; }
   .evidence-open { display: none; }
 }

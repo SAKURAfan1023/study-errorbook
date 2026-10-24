@@ -38,7 +38,7 @@ async def main(config_path):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     listed = await session.list_tools()
-                    assert len(listed.tools) == 32
+                    assert len(listed.tools) == 35
                     schemas = {tool.name: tool.inputSchema for tool in listed.tools}
                     check_output = next(tool.outputSchema for tool in listed.tools if tool.name == 'check_exercise')
                     assert set(check_output['properties']['status']['enum']) == {'equivalent', 'not_equivalent', 'needs_review'}
@@ -100,6 +100,10 @@ async def main(config_path):
                     assert '4096' in numeric_check.structuredContent['reason']
                     document = await session.call_tool("import_document", {"path": candidates.structuredContent['items'][0]['path']})
                     assert not document.isError
+                    initial_progress = await session.call_tool('read_task_progress', {'document_id': document.structuredContent['id']})
+                    assert not initial_progress.isError
+                    assert initial_progress.structuredContent['pages'][0]['inventory_status'] == 'uninspected'
+                    assert not initial_progress.structuredContent['organization_complete']
                     saved_jobs = await session.call_tool('list_parse_jobs', {'document_id': document.structuredContent['id']})
                     assert not saved_jobs.isError and saved_jobs.structuredContent['total'] == 0
                     assert saved_jobs.structuredContent['next_offset'] is None
@@ -238,14 +242,14 @@ async def main(config_path):
                     })
                     assert not exported.isError
                     files = [Path(p) for p in exported.structuredContent["files"]]
-                    assert len(files) == 3 and all(p.is_file() for p in files)
+                    assert len(files) == 4 and all(p.is_file() for p in files)
                     material_label = '资料编号：' + exported.structuredContent['export_id']
                     assert all(material_label in p.read_text() for p in files)
                     practice_bundle = Path(exported.structuredContent['practice_bundle_path'])
                     with zipfile.ZipFile(practice_bundle) as archive:
                         assert archive.testzip() is None
                         assert {'practice.html', 'README.txt', 'assets/export.js'} <= set(archive.namelist())
-                        assert not {'errorbook.html', 'answers.html', 'manifest.json', evidence['id'] + '.png'} & set(archive.namelist())
+                        assert not {'errorbook.html', 'answers.html', 'feedback.html', 'manifest.json', evidence['id'] + '.png'} & set(archive.namelist())
                         assert len(archive.namelist()) == 69
                         assert material_label in archive.read('README.txt').decode('utf-8')
                         assert material_label in archive.read('practice.html').decode('utf-8')
@@ -285,6 +289,25 @@ async def main(config_path):
                         "user_note": "Synthetic installer fixture, no real user opinion.",
                     })
                     assert not included.isError
+                    whole_page = await session.call_tool('read_evidence', {
+                        'document_id': crop_doc['id'], 'region': {'page': 1, 'box': [0, 0, 1, 1]}})
+                    whole_evidence = json.loads(next(p.text for p in whole_page.content if p.type == 'text'))
+                    duplicate = await session.call_tool('update_document_coverage', {
+                        'document_id': crop_doc['id'], 'expected_revision': 0,
+                        'pages': [{'page': 1, 'evidence_id': whole_evidence['id'], 'questions': [
+                            {'question_label': '1', 'record_id': record_id},
+                            {'question_label': '2', 'record_id': record_id}]}]})
+                    assert duplicate.isError and 'coverage_record_duplicate' in duplicate.content[0].text
+                    unchanged = await session.call_tool('read_task_progress', {'document_id': crop_doc['id']})
+                    assert not unchanged.isError and unchanged.structuredContent['coverage_revision'] == 0
+                    assert not unchanged.structuredContent['organization_complete']
+                    progress = await session.call_tool('update_document_coverage', {
+                        'document_id': crop_doc['id'], 'expected_revision': 0,
+                        'pages': [{'page': 1, 'evidence_id': whole_evidence['id'], 'questions': [
+                            {'question_label': '1', 'record_id': record_id},
+                            {'question_label': '2', 'skip_reason': 'Synthetic out-of-scope question'}]}]})
+                    assert not progress.isError and progress.structuredContent['organization_complete']
+                    assert progress.structuredContent['counts'] == {'processed': 1, 'pending': 0, 'skipped': 1}
                     historical = await session.call_tool("read_study_record", {"record_id": record_id, "revision": 1})
                     assert not historical.isError
                     old = historical.structuredContent
@@ -334,6 +357,9 @@ async def main(config_path):
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
+                    continued = await session.call_tool('read_task_progress', {'document_id': crop_doc['id']})
+                    assert not continued.isError and continued.structuredContent['coverage_revision'] == 1
+                    assert continued.structuredContent['counts']['processed'] == 1
                     recovered = await session.call_tool("read_study_record", {"record_id": record_id})
                     assert not recovered.isError
                     history = await session.call_tool("read_practice_history", {"record_id": record_id, "include_details": True})
@@ -408,19 +434,19 @@ async def main(config_path):
                     assert not equation_export.isError
                     answer_page = (Path(equation_export.structuredContent['folder']) / 'answers.html').read_text()
                     assert '一元一次方程的唯一解验算通过' in answer_page
-        print(json.dumps({"tools": 32, "linear_equation_checks": True, "parse_job_discovery": True, "input_discovery_without_import": True, "runtime_version": runtime_version, "export_failure_recovery": True, "saved_record_revision_reads": True, "synthetic_import": True, "filtered_content_search": True, "practice_prompt_without_answer_fields": True, "image_content": True,
+        print(json.dumps({"tools": 35, "linear_equation_checks": True, "parse_job_discovery": True, "input_discovery_without_import": True, "runtime_version": runtime_version, "export_failure_recovery": True, "saved_record_revision_reads": True, "synthetic_import": True, "filtered_content_search": True, "practice_prompt_without_answer_fields": True, "image_content": True,
                           "deletion_inventory_without_mutation": True, "local_cascade_deletion_and_receipt": True,
                           "local_redacted_copy": True,
                           "bounded_original_png_pdf_rendering_and_restore": True,
                           "changed_redaction_evidence_refused": True,
                           "local_crop_pixels_lineage_cache_and_cascade": True,
                           "exported_crop_lineage": True,
-                          "export_files": 3, "export_assets": 67, "restart_persistence": True,
+                          "export_files": 4, "export_assets": 67, "restart_persistence": True,
                           "original_practice_history": True, "attempt_retry_deduplication": True,
                           "practice_feedback_persistence": True,
                           "user_opinion_preservation_and_withdrawal": True,
                           "review_plan_completion_and_restart": True, "old_attempt_cannot_complete_new_plan": True,
-                          "ocr_calls": 0}))
+                          "task_progress_and_coverage_restart": True, "same_page_record_alias_rejected": True, "ocr_calls": 0}))
 
 
 if __name__ == "__main__":
