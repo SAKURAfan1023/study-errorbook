@@ -24,8 +24,8 @@ class Region(Input):
 
 class CoverageQuestion(Input):
     question_label: str = Field(min_length=1, max_length=100)
-    record_id: str | None = Field(default=None, min_length=1, max_length=100)
-    skip_reason: str = Field(default="", max_length=400)
+    record_id: str | None = Field(default=None, min_length=1, max_length=100, description="关联已保存记录；填写skip_reason时必须省略record_id，不能同时关联并跳过。")
+    skip_reason: str = Field(default="", max_length=400, description="本轮跳过理由；有理由时省略record_id，原草稿仍保留。")
 
     @model_validator(mode="after")
     def exclusive_disposition(self):
@@ -67,6 +67,7 @@ class Analysis(Input):
 
 
 class Exercise(Input):
+    kind: Literal["variant", "original_text"] = Field(default="variant", description="variant为变式；original_text为依据完整原图核实的原题文字重练，答案仍独立保存。")
     prompt: str = Field(min_length=1, max_length=4000)
     answer: str = Field(min_length=1, max_length=4000)
     explanation: str = Field(default="", max_length=4000)
@@ -95,7 +96,7 @@ class PracticeFeedback(Input):
     feedback: str = Field(min_length=1, max_length=4000)
     next_step: str = Field(min_length=1, max_length=2000)
     user_verdict: Literal["unreported", "correct", "wrong", "partial", "uncertain"] = "unreported"
-    user_note: str = Field(default="", max_length=2000)
+    user_note: str = Field(default="", max_length=2000, description="只记录用户明确自判或撤回意见；user_verdict=unreported且未撤回时必须省略。模拟来源或作答声明写入feedback，不写此字段。")
     withdraw_user_opinion: bool = Field(default=False, strict=True,
         description="Only on an explicit user withdrawal; requires unreported and a nonempty withdrawal note.")
 

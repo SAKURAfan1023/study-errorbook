@@ -1,47 +1,44 @@
 # study-errorbook 本地 client
 
-[study-errorbook@0.1.0](https://www.npmjs.com/package/study-errorbook/v/0.1.0) 已发布。真实registry下载与批准包完全一致；无认证、无全局Python/uv的隔离环境中，固定npx命令的35工具冷启动和离线重启均通过。桌面插件窗口仍待用户实测。发布包内README是发布前快照，以本仓库当前说明为准。
+当前公开版本为0.1.0。本目录是 **study-errorbook@0.1.1待发布候选**，尚未上传npm；以下固定1.1命令需发布后才可从registry执行。本地候选验收使用tarball安装后的client，不能把它当默认插件窗口开箱通过。
 
-需要 Node.js 22+ / npm，以及macOS自带或Linux已有的 `/usr/bin/tar` 解包工具；用户无需解压ZIP或手动安装Python/uv。client保留现有Python核心，首次从Astral官方固定发布下载uv 0.12.17（内置SHA256校验）、自动准备隔离CPython 3.12.14和锁定依赖，随后通过本地stdio运行MCP。不是纯Node实现。只支持macOS/Linux glibc arm64/x64；本轮实测macOS arm64，其他三种组合未实机验证，不支持原生Windows。
+## 安装与使用
 
-## 插件窗口入口（待桌面验收）
+需要Node.js22+/npm及系统tar。插件由仓库`.agents/plugins/marketplace.json`指向固定npm版本；包内包含标准plugin.json、mcp.json和Skill，默认启动`npx --yes study-errorbook@0.1.1 serve`。用户在支持本地插件的桌面端安装后说“整理作业”，不需要解压ZIP或复制MCP配置。桌面实际结果以本轮原生验收记录为准。
 
-原仓库提供真实市场文件 `.agents/plugins/marketplace.json`，使用官方支持的 npm source 固定引用 `study-errorbook@0.1.0`。npm 包内 `plugin.json`、`mcp.json` 和 Skill 已齐备；启动命令为 `npx --yes study-errorbook@0.1.0 serve`，serve 自动准备运行时，用户不需要复制 MCP JSON。
+首次serve自动从Astral官方固定发布下载uv0.12.17并校验SHA256，准备私有CPython3.12.14和哈希锁定依赖，随后本地stdio运行。不是纯Node；首次需npm/GitHub/PyPI网络。只支持macOS/Linux glibc arm64/x64，本轮实测macOS arm64，原生Windows不支持。stdout仅MCP，程序下载和错误写stderr。
 
-已具备 Node/npm：在支持本地市场的 ChatGPT 桌面端打开这个市场中的插件详情 → 点击安装 → 在对话说“整理作业”。首次启动下载运行时可能超过宿主初始化时限；本轮尚未执行桌面窗口安装，不能把配置齐备当成窗口快装已验收。网页版不能执行本机stdio进程。首次真实识别所需凭据与上传授权另见下文。
+## 启动前选择profile
 
-已有本地仓库时可生成详情链接（只打印，不注册或打开宿主）：
+默认serve启动前读取`~/.config/study-errorbook/client.json`的activeProfile；无配置时沿用原有核心设置。公开文件只接受路径、profile名与credentialsDisabled，不接受密钥。先停止旧进程，选择profile，再用新会话启动插件，不在对话后切目录。
 
 ```sh
-node scripts/plugin_link.mjs
+npx --yes study-errorbook@0.1.1 setup --profile acceptance --input /绝对/合成输入目录 --data /绝对/独立数据目录 --no-credentials
+npx --yes study-errorbook@0.1.1 doctor
 ```
 
-实际市场文件路径由链接自动编码，仓库移动后重新生成即可。此脚本在源码仓库中，非 npm 包的一部分。普通用户无需手写路径。市场引用的npm包已发布，本地市场链接可用于下一步窗口验收；尚未提交公共插件目录，也未把原生窗口体验标为通过。
+导出目录固定为所选data下的`exports/`，不额外扩大写入根。`--no-credentials`使该profile不继承TextIn凭据，workspace_status应显示textin_configured=false；它不是上传授权，免费模式仍会上传，验收不得调用识别接口。profile只影响新启动进程，不热切换运行中的库。显式进程环境路径优先；必须由实际workspace_status核对client_profile、data_dir、input_root和exports_dir，不能只看setup成功。
 
-依据：[官方插件打包与 npm marketplace](https://developers.openai.com/plugins/build/plugins)、[桌面本地插件链接](https://learn.chatgpt.com/docs/app/commands)。没有修改全局市场、当前连接或安装设置。
+未给named profile路径时，默认在`~/.local/share/study-errorbook/profiles/名称/`下准备inbox/data。旧inputRoot单字段配置可继续读取。默认profile沿用现有核心配置；需要自选目录可用setup --input/--data。
 
-## CLI 排查与提前准备
+## 备份、恢复与边界
 
-插件正常路径不要求以下命令。需要避免宿主首次启动超时，或接入仅支持MCP配置的其他宿主时，可运行 `npx --yes study-errorbook@0.1.0 setup` 提前准备；`mcp-config`输出完整配置。需要自选输入目录时运行setup加 `--input /绝对/目录`，只保存目录，不保存凭据。
+setup变更client.json前写`client.json.bak`，首次无旧文件时备份为等效默认`{}`。`restore-config`验证备份并恢复，当前文件另存`client.json.before-restore`，不会修改凭据或宿主连接：
 
-默认输入目录为 `~/Documents/StudyErrorbook/inbox`，自动创建。已有核心配置中的输入目录优先，显式 `setup --input`可选择client输入目录。上述固定版本现已可从公共registry获取，普通安装不需要npm登录。
+```sh
+npx --yes study-errorbook@0.1.1 restore-config
+```
 
-第一次真实识别前仍需服务凭据及材料上传/页数授权。client只沿用核心原有环境变量或 `~/.config/study-errorbook/config.env` 读取逻辑，不生成、存储或打印凭据；也不强迫每个本地操作逐次确认。没有真实凭据可做本地导入、已授权缓存读取和合成自检；默认付费识别不会悄悄切到免费上传。
+恢复后重启插件/新会话才生效；或用`setup --profile default`返回默认profile。不要把密码、OTP或token发到聊天。真实TextIn仅由runtime沿既有环境或核心config.env机制读取，client不创建、复制或打印密钥，也不调整Keychain或2FA。
 
-宿主若直接运行client，命令为 `study-errorbook serve`；无参数也运行serve。首次serve可以自动准备环境，但宿主初始化可能超时，因此建议先单独setup。serve的stdout仅输出MCP协议，下载、安装和错误均发到stderr。
+程序缓存与profile数据分开：macOS为`~/Library/Caches/study-errorbook/client`，Linux为XDG缓存目录。默认学习数据仍是`~/.local/share/study-errorbook`。每个载荷独立安装，完成才写ready；失败可重跑，旧数据不重置。稳定插件配置不依赖npm缓存。`--offline`不回退全局Python/uv。`doctor`只读不安装；`self-test`仅合成stdio测试，不验证窗口体验。`STUDY_CLIENT_HOME`仅供完全独立的开发验收，不是默认插件开箱证据。
 
-## 缓存、升级与排查
+## 完整学生材料
 
-- macOS程序缓存：`~/Library/Caches/study-errorbook/client`；Linux为 `$XDG_CACHE_HOME/study-errorbook/client` 或 `~/.cache/study-errorbook/client`。
-- 学习数据仍在 `~/.local/share/study-errorbook`，已有核心凭据配置仍在 `~/.config/study-errorbook/config.env`；两者都独立于npm/npx缓存。client目录选择保存在同目录的 `client.json`，只含输入目录，不含令牌。
-- 运行 `study-errorbook doctor` 只读检查，不安装或读取/打印凭据。`self-test`复用随包的合成stdio自检，无真实OCR。
-- `serve --offline` / `setup --offline` 要求已有完整隔离缓存；不会退回全局Python或uv。冷启动缺失缓存会给出stderr错误，失败不会改动学习数据。
-- 每个发布载荷使用独立运行目录，安装完成后才写ready标记。失败可重跑setup，同一机器并发准备通过锁串行，退出后旧锁可恢复。旧学习数据不因升级重置。
-- 升级显式改用新npm版本并先setup，再更新宿主配置；旧版本目录保留用于回退。本地stdio、Skill和运行版本仍须实际核对，不由安装包名代替。
-- 如需完全隔离的开发验收，可设置 `STUDY_CLIENT_HOME=/新建临时目录`；这会把该次client的程序缓存、配置路径、输入和数据限制在该目录，不修改HOME或当前宿主。
+正式导出缺题会停止而不生成少题包。没有变式/净题图的已核实文字题，可由Agent补为kind=original_text，题面须等于当前stem，答案独立保存并验算/复核；原题范围不能用变式顶替。学生ZIP与答案册分开，student_materials清单按所选记录和题目类型对账，资源文件数不是题目数。明确讨论草稿才用include_drafts；缺题草稿不是完成交付。
 
-## 源码构建与发布边界
+## 构建与原生验收
 
-在原仓库运行 `python3 scripts/build_npm_client.py`（开发者环境需要Python 3.12和uv），再进入npm-client运行 `npm pack --ignore-scripts`。生成的npm包只纳入启动器、wheel、锁定依赖、合成自检、Skill、兼容manifest和许可说明；没有postinstall下载钩子，没有材料、数据库、`.env`、机器路径MCP配置或凭据。
+开发者使用项目Python3.12和uv运行`uv run python scripts/build_npm_client.py`，再在npm-client执行`npm pack --ignore-scripts`。允许列表只含启动器、wheel、锁定依赖、自检、Skill、manifest与许可，无postinstall、资料、数据库、凭据或机器配置。0.1.0不可覆盖；发布0.1.1前须提供新包哈希与验收证据。
 
-0.1.0已发布且不可覆盖；后续源码构建不可冒充同版本的新发布，发布新版本前需重新验证。发布者须自行完成npm登录与发布2FA；普通公开包安装用户不需要这些发布权限。不要把密码、OTP或token发到聊天，client不承担npm登录或令牌管理。
+本地已有仓库可运行`node scripts/plugin_link.mjs`打印真实本地市场详情链接，脚本不注册/打开宿主。默认插件窗口需协调器按实际安装配置验证；显式测试MCP和CLI自检不得冒充开箱结果。

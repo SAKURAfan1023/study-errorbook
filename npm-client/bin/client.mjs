@@ -29,13 +29,59 @@ function run(executable, argv, env, capture=false) {
     child.on('exit',code=>code===0?resolve(output):reject(new Error(`准备运行时失败（退出码 ${code}）；未上传材料。检查网络和上方错误后重试 setup，原数据不受影响。`)));
   });
 }
+function validateConfig(saved) {
+  if(!saved || typeof saved!=='object' || Array.isArray(saved) || Object.keys(saved).some(k=>!['schema','inputRoot','activeProfile','profiles'].includes(k))) throw new Error('client.json只接受公开profile配置，不接受凭据或未知字段。');
+  const validName=name=>typeof name==='string' && /^[a-z][a-z0-9-]{0,39}$/.test(name);
+  const validPath=value=>typeof value==='string' && path.isAbsolute(value);
+  if(saved.schema!==undefined && saved.schema!==1)throw new Error('不支持此client配置版本，请先恢复备份。');
+  if(saved.inputRoot!==undefined&&!validPath(saved.inputRoot))throw new Error('inputRoot应为绝对目录。');
+  if(saved.activeProfile!==undefined&&!validName(saved.activeProfile))throw new Error('profile名称须为1–40位小写字母、数字或连字符，以字母开头。');
+  if(saved.profiles!==undefined && (!saved.profiles||typeof saved.profiles!=='object'||Array.isArray(saved.profiles)))throw new Error('profiles应为公开路径配置对象。');
+  for(const [name,profile] of Object.entries(saved.profiles||{})) {
+    if(!validName(name)||!profile||typeof profile!=='object'||Array.isArray(profile)||Object.keys(profile).some(k=>!['inputRoot','dataRoot','credentialsDisabled'].includes(k)))throw new Error('profile只接受inputRoot/dataRoot/credentialsDisabled，不接受凭据。');
+    if(profile.inputRoot!==undefined&&!validPath(profile.inputRoot)||profile.dataRoot!==undefined&&!validPath(profile.dataRoot)||profile.credentialsDisabled!==undefined&&typeof profile.credentialsDisabled!=='boolean')throw new Error('profile路径须为绝对目录，credentialsDisabled须为布尔值。');
+  }
+  return saved;
+}
+function profileSettings(saved) {
+  const name=saved.activeProfile||'default';
+  const selected=saved.profiles&&Object.hasOwn(saved.profiles,name)?saved.profiles[name]:undefined;
+  if(name!=='default'&&!selected)throw new Error('activeProfile不存在；请setup选择已有profile或restore-config恢复。');
+  return {name,profile:selected||{},input:selected?.inputRoot||saved.inputRoot||inboxDefault};
+}
 async function options() {
-  if(args.some((a,i)=>a!=='--offline' && !(command==='setup' && (a==='--input' || args[i-1]==='--input')))) throw new Error('不支持的参数；使用 --help 查看用法。');
+  const changes={};
+  for(let i=0;i<args.length;i++) {
+    const key=args[i];
+    if(key==='--offline')continue;
+    if(command==='setup'&&key==='--no-credentials'){changes.credentialsDisabled=true;continue;}
+    if(command==='setup'&&['--profile','--input','--data'].includes(key)) {
+      const value=args[++i];if(!value||value.startsWith('--'))throw new Error(key+'需要值。');
+      changes[key]=value;continue;
+    }
+    throw new Error('不支持的参数；使用 --help 查看用法。');
+  }
   const file=path.join(configRoot,'client.json');
-  let saved={};
-  if(await exists(file)) saved=JSON.parse(await fs.readFile(file,'utf8'));
-  if(saved.inputRoot && (!path.isAbsolute(saved.inputRoot)||typeof saved.inputRoot!=='string')) throw new Error('client.json 的 inputRoot 应为绝对目录。');
-  return {file,saved};
+  const saved=validateConfig(await exists(file)?JSON.parse(await fs.readFile(file,'utf8')):{});
+  if(Object.keys(changes).length) {
+    const name=changes['--profile']||saved.activeProfile||'default';
+    const home=customHome?path.join(customHome,'profiles',name):path.join(os.homedir(),'.local/share/study-errorbook/profiles',name);
+    const previous=(saved.profiles&&Object.hasOwn(saved.profiles,name)?saved.profiles[name]:undefined)||(name==='default'?{...(saved.inputRoot?{inputRoot:saved.inputRoot}:{})}: {inputRoot:path.join(home,'inbox'),dataRoot:path.join(home,'data')});
+    const profile={...previous};
+    if(changes['--input'])profile.inputRoot=path.resolve(changes['--input']);
+    if(changes['--data'])profile.dataRoot=path.resolve(changes['--data']);
+    if(changes.credentialsDisabled)profile.credentialsDisabled=true;
+    saved.schema=1;saved.activeProfile=name;saved.profiles={...saved.profiles,[name]:profile};validateConfig(saved);
+  }
+  return {file,saved,changed:Object.keys(changes).length>0,...profileSettings(saved)};
+}
+async function saveConfig(configuration) {
+  await fs.mkdir(configRoot,{recursive:true,mode:0o700});
+  if(await exists(configuration.file)){await fs.copyFile(configuration.file,configuration.file+'.bak');await fs.chmod(configuration.file+'.bak',0o600);}
+  else await fs.writeFile(configuration.file+'.bak','{}\n',{mode:0o600});
+  const temporary=configuration.file+'.'+process.pid+'.tmp';
+  await fs.writeFile(temporary,JSON.stringify(configuration.saved,null,2)+'\n',{mode:0o600});
+  await fs.rename(temporary,configuration.file);
 }
 async function payload() {
   const manifest=JSON.parse(await fs.readFile(path.join(packageRoot,'runtime/manifest.json'),'utf8'));
@@ -143,31 +189,41 @@ async function prepare(state) {
 }
 async function main() {
   if(['--help','help'].includes(command)) {
-    console.log('study-errorbook [serve | setup [--input DIRECTORY] [--offline] | doctor | mcp-config | self-test]\n首次运行自动准备隔离Python。serve的stdout仅为MCP协议；日志写stderr。无需手工安装Python/uv。');return;
+    console.log('study-errorbook [serve | setup [--profile NAME] [--input DIRECTORY] [--data DIRECTORY] [--no-credentials] [--offline] | doctor | restore-config | mcp-config | self-test]\n默认serve在启动前加载所选profile；data下的exports为导出目录。配置不含密钥，变更自动备份，restore-config恢复。serve stdout仅MCP协议。');return;
   }
-  if(!['serve','setup','doctor','mcp-config','self-test'].includes(command))throw new Error('未知命令；使用 --help 查看用法。');
+  if(!['serve','setup','doctor','restore-config','mcp-config','self-test'].includes(command))throw new Error('未知命令；使用 --help 查看用法。');
   if(!['darwin','linux'].includes(process.platform)||!['arm64','x64'].includes(process.arch))throw new Error('Python核心目前仅支持macOS/Linux glibc arm64/x64；不支持Windows。');
-  const configuration=await options();const state=await payload();
-  const inputIndex=args.indexOf('--input');
-  if(inputIndex!==-1) {
-    if(!args[inputIndex+1]||args[inputIndex+1].startsWith('--'))throw new Error('--input 需要目录。');
-    configuration.saved.inputRoot=path.resolve(args[inputIndex+1]);
+  const state=await payload();
+  if(command==='restore-config') {
+    if(args.length)throw new Error('restore-config不接受参数。');
+    const file=path.join(configRoot,'client.json'),backup=file+'.bak';
+    if(!await exists(backup))throw new Error('没有client.json.bak；未改当前配置。');
+    const saved=validateConfig(JSON.parse(await fs.readFile(backup,'utf8')));
+    if(await exists(file)){await fs.copyFile(file,file+'.before-restore');await fs.chmod(file+'.before-restore',0o600);}
+    const temporary=file+'.'+process.pid+'.tmp';await fs.writeFile(temporary,JSON.stringify(saved,null,2)+'\n',{mode:0o600});await fs.rename(temporary,file);
+    console.log(JSON.stringify({restored:true,profile:profileSettings(saved).name,config:file,note:'仅恢复公开client配置，未改凭据或宿主；新启动的serve生效。'},null,2));return;
   }
+  const configuration=await options();
+  const profile=configuration.profile;
+  const data=process.env.STUDY_DATA_DIR||profile.dataRoot||(customHome?path.join(customHome,'data'):null);
+  const inbox=process.env.STUDY_INPUT_ROOT||configuration.input;
+  const locations={profile:configuration.name,input:inbox,data,exports:data?path.join(data,'exports'):null,credentials_disabled:!!profile.credentialsDisabled};
   if(command==='doctor') {
-    console.log(JSON.stringify({installed:await ready(state),runtime_version:state.manifest.runtime_version,cache:cacheRoot,config:configRoot,input:configuration.saved.inputRoot||inboxDefault,transport:'local stdio',credentials:'只从现有环境/核心配置读取；client不保存令牌'},null,2));return;
+    console.log(JSON.stringify({installed:await ready(state),runtime_version:state.manifest.runtime_version,cache:cacheRoot,config:configRoot,...locations,transport:'local stdio',note:data?'配置路径由下次serve加载；workspace_status核对实际路径。':'默认data沿用runtime现有核心配置；workspace_status核对实际路径。'},null,2));return;
   }
   await prepare(state);
-  const inbox=configuration.saved.inputRoot||inboxDefault;
   await fs.mkdir(inbox,{recursive:true,mode:0o700});
   if(command==='setup') {
-    if(inputIndex!==-1){await fs.mkdir(configRoot,{recursive:true,mode:0o700});await fs.writeFile(configuration.file,JSON.stringify(configuration.saved,null,2)+'\n',{mode:0o600});}
-    console.log(JSON.stringify({ready:true,runtime_version:state.manifest.runtime_version,input:inbox,plugin_directory:path.join(state.folder,'plugin'),note:'不注册宿主、不存储凭据、不上传材料；配置见mcp-config。'},null,2));return;
+    if(configuration.changed)await saveConfig(configuration);
+    console.log(JSON.stringify({ready:true,runtime_version:state.manifest.runtime_version,...locations,config:configuration.file,backup:await exists(configuration.file+'.bak')?configuration.file+'.bak':null,plugin_directory:path.join(state.folder,'plugin'),note:'默认插件serve会读取该profile；已运行进程须重启才生效。不注册宿主、不保存凭据、不上传材料。'},null,2));return;
   }
   const configFile=path.join(state.folder,'plugin/.mcp.json');
   if(command==='mcp-config'){console.log(await fs.readFile(configFile,'utf8'));return;}
-  const env={...process.env,STUDY_CLIENT_INPUT_ROOT:inbox};
-  if(configuration.saved.inputRoot)env.STUDY_INPUT_ROOT=configuration.saved.inputRoot;
-  if(customHome){env.STUDY_DATA_DIR ??= path.join(customHome,'data');env.STUDY_CONFIG_FILE ??= path.join(configRoot,'config.env');}
+  const env={...process.env,STUDY_CLIENT_INPUT_ROOT:inbox,STUDY_CLIENT_PROFILE:configuration.name};
+  if((profile.inputRoot||configuration.saved.inputRoot)&&!env.STUDY_INPUT_ROOT)env.STUDY_INPUT_ROOT=inbox;
+  if(data&&!env.STUDY_DATA_DIR)env.STUDY_DATA_DIR=data;
+  if(customHome)env.STUDY_CONFIG_FILE ??= path.join(configRoot,'config.env');
+  if(profile.credentialsDisabled){env.TEXTIN_APP_ID='';env.TEXTIN_SECRET_CODE='';env.STUDY_CONFIG_FILE ??= path.join(configRoot,'profiles',configuration.name,'no-credentials.env');}
   const python=path.join(state.folder,'runtime/bin/python');
   const argv=command==='self-test'?['-I',path.join(packageRoot,'runtime/verify_release.py'),configFile]:['-I','-m','study_errorbook.server'];
   activeChild=spawn(python,argv,{env,stdio:'inherit'});

@@ -434,7 +434,53 @@ async def main(config_path):
                     assert not equation_export.isError
                     answer_page = (Path(equation_export.structuredContent['folder']) / 'answers.html').read_text()
                     assert '一元一次方程的唯一解验算通过' in answer_page
-        print(json.dumps({"tools": 35, "linear_equation_checks": True, "parse_job_discovery": True, "input_discovery_without_import": True, "runtime_version": runtime_version, "export_failure_recovery": True, "saved_record_revision_reads": True, "synthetic_import": True, "filtered_content_search": True, "practice_prompt_without_answer_fields": True, "image_content": True,
+                    coverage_saved = await session.call_tool('save_study_record', {'record': {
+                        'document_id': document.structuredContent['id'], 'question_label': 'Synthetic missing student material',
+                        'stem': 'Simplify 2*(x+1)+3*x', 'evidence_ids': [equation_evidence['id']],
+                    }})
+                    assert not coverage_saved.isError
+                    coverage_id = coverage_saved.structuredContent['id']
+                    coverage_review = await session.call_tool('review_study_record', {
+                        'record_id': coverage_id, 'expected_revision': 1, 'decision': 'include',
+                        'user_note': 'Synthetic explicit selection before export.'})
+                    assert not coverage_review.isError
+                    missing_export = await session.call_tool('export_errorbook', {'record_ids': [equation_id, coverage_id]})
+                    assert missing_export.isError and 'student_material_missing' in missing_export.content[0].text
+                    archive_only = await session.call_tool('export_errorbook', {'record_ids': [coverage_id], 'practice_scope': 'archive'})
+                    assert not archive_only.isError and archive_only.structuredContent['practice_bundle_path'] is None
+                    assert not archive_only.structuredContent['student_materials']['requested']
+                    ready_query = await session.call_tool('query_errorbook', {
+                        'ready_exercises_only': True, 'exercise_kind': 'variant', 'document_id': document.structuredContent['id']})
+                    assert not ready_query.isError
+                    assert [r['id'] for r in ready_query.structuredContent['items']] == [equation_id]
+                    original_check = await session.call_tool('check_exercise', {
+                        'expression': '2*(x+1)+3*x', 'proposed_answer': '5*x+2'})
+                    assert not original_check.isError
+                    coverage_body = coverage_review.structuredContent['record']
+                    coverage_body['exercises'] = [{'kind': 'original_text', 'prompt': coverage_body['stem'],
+                        'answer': '5*x+2', 'targets_error': 'Synthetic distribution',
+                        'check_id': original_check.structuredContent['id']}]
+                    completed = await session.call_tool('save_study_record', {
+                        'record_id': coverage_id, 'expected_revision': 2, 'record': coverage_body})
+                    assert not completed.isError
+                    completed_review = await session.call_tool('review_study_record', {
+                        'record_id': coverage_id, 'expected_revision': 3, 'decision': 'include',
+                        'user_note': 'Synthetic explicit review of completed original text.'})
+                    assert not completed_review.isError
+                    complete_export = await session.call_tool('export_errorbook', {'record_ids': [equation_id, coverage_id]})
+                    assert not complete_export.isError
+                    student = complete_export.structuredContent['student_materials']
+                    assert student['complete'] and student['selected_record_count'] == student['covered_record_count'] == 2
+                    assert student['text_question_count'] == student['answer_question_count'] == 2
+                    assert student['variant_question_count'] == student['original_text_question_count'] == 1
+                    with zipfile.ZipFile(complete_export.structuredContent['practice_bundle_path']) as bundle:
+                        student_html = bundle.read('practice.html').decode()
+                        assert student_html.count("class='exercise'") == 2
+                        assert '5*x+2' not in student_html and 'answers.html' not in bundle.namelist()
+                    wrong_scope = await session.call_tool('export_errorbook', {
+                        'record_ids': [coverage_id], 'practice_scope': 'variants'})
+                    assert wrong_scope.isError and 'student_material_missing' in wrong_scope.content[0].text
+        print(json.dumps({"tools": 35, "student_export_coverage_guard_and_completion": True, "ready_exercise_selection": True, "linear_equation_checks": True, "parse_job_discovery": True, "input_discovery_without_import": True, "runtime_version": runtime_version, "export_failure_recovery": True, "saved_record_revision_reads": True, "synthetic_import": True, "filtered_content_search": True, "practice_prompt_without_answer_fields": True, "image_content": True,
                           "deletion_inventory_without_mutation": True, "local_cascade_deletion_and_receipt": True,
                           "local_redacted_copy": True,
                           "bounded_original_png_pdf_rendering_and_restore": True,

@@ -94,7 +94,7 @@ async def list_input_files(ctx: Context, offset: StrictInt = 0, limit: StrictInt
 
 
 @mcp.tool(annotations=READ)
-async def list_documents(ctx: Context, offset: int = 0, limit: int = 20) -> dict[str, Any]:
+async def list_documents(ctx: Context, offset: Annotated[StrictInt, Field(ge=0)] = 0, limit: Annotated[StrictInt, Field(ge=1, le=50)] = 20) -> dict[str, Any]:
     """分页找回已导入材料及其真实 ID，避免跨会话猜测 ID。"""
     return ctx.request_context.lifespan_context.list_documents(offset, limit)
 
@@ -290,15 +290,18 @@ async def read_practice_prompt(
 
 @mcp.tool(annotations=READ)
 async def query_errorbook(
-    ctx: Context, search: str = "", offset: StrictInt = 0, limit: StrictInt = 20,
+    ctx: Context, search: str = "", offset: Annotated[StrictInt, Field(ge=0)] = 0, limit: Annotated[StrictInt, Field(ge=1, le=50)] = 20,
     review_status: Literal["needs_review", "include", "exclude", "uncertain"] | None = None,
     subject: str | None = None, document_id: str | None = None, knowledge_point: str | None = None,
     agent_verdict: Literal["correct", "wrong", "partial", "unanswered", "uncertain"] | None = None,
+    ready_exercises_only: StrictBool = False,
+    exercise_kind: Literal["variant", "original_text"] | None = None,
 ) -> dict[str, Any]:
-    """查当前错题文本，关键词为不区分大小写的字面子串；不匹配内部字段名/ID/旧历史，不支持通配符或Anki语法。可按复核状态、Agent判断、学科、文档ID及单个知识点精确筛选，条件取交集；省略表示全部。默认含已排除题，练习选题宜指定review_status=include。agent_verdict=wrong表示模型判错，不等于用户已纳入；agent_verdict=uncertain也不等于review_status=uncertain。返回分页题干摘要及next_offset；摘要项JSON合计最多12000个UTF-8字节，即使少于limit也须按next_offset继续；不会重新OCR。翻页期间增删改后刷新首页，摘要可能含提示，不在独立作答前展示。"""
+    """已有变式重练用ready_exercises_only=true，只匹配已纳入且有就绪文字练习的记录；变式再加exercise_kind=variant，原题文字重练用original_text。使用返回ready_exercises的真实下标，不猜0。limit为1–50。查当前错题文本，关键词为不区分大小写的字面子串；不匹配内部字段名/ID/旧历史，不支持通配符或Anki语法。可按复核状态、Agent判断、学科、文档ID及单个知识点精确筛选，条件取交集；省略表示全部。默认含已排除题，练习选题宜指定review_status=include。agent_verdict=wrong表示模型判错，不等于用户已纳入；agent_verdict=uncertain也不等于review_status=uncertain。返回分页题干摘要及next_offset；摘要项JSON合计最多12000个UTF-8字节，即使少于limit也须按next_offset继续；不会重新OCR。翻页期间增删改后刷新首页，摘要可能含提示，不在独立作答前展示。"""
     return ctx.request_context.lifespan_context.query_errorbook(
         search, offset, limit, review_status=review_status, subject=subject,
         document_id=document_id, knowledge_point=knowledge_point, agent_verdict=agent_verdict,
+        ready_exercises_only=ready_exercises_only, exercise_kind=exercise_kind,
     )
 
 
@@ -383,10 +386,11 @@ async def read_practice_feedback(
 
 @mcp.tool(annotations=WRITE)
 async def export_errorbook(
-    record_ids: list[str], ctx: Context, include_drafts: bool = False
+    record_ids: list[str], ctx: Context, include_drafts: bool = False,
+    practice_scope: Literal["all", "variants", "originals", "archive"] = "all",
 ) -> dict[str, Any]:
-    """导出本地可打印HTML错题本、学生变式题册与独立答案册及原卷证据图；有历史作答时另附feedback.html反馈报告（最近20次）。选了clean_evidence_ids时额外输出original-practice.html原题重练册。practice_bundle_path是仅练习材料的ZIP，含练习页、所选净题图与离线资源，不含答案册/错题本/原卷图；给学生材料时使用此包并完整解压，不要复制含答案的整个导出目录。题干与净题图仍需检查提示残留。默认只导出用户纳入、练习有适用验算/用户复核、净题已按当前图片复核的记录；先read_study_record查看exercise_validation和clean_copy_validation。include_drafts允许带待复核标记的草稿。证据明细在manifest_path。完整导出目录供留档，含答案和原作答。不会自动发布或发送。"""
-    return ctx.request_context.lifespan_context.export_errorbook(record_ids, include_drafts)
+    """正式导出要求每条选中记录都有本范围学生材料；缺题返回student_material_missing且不创建成品。practice_scope=all含已有学生材料，variants仅变式，originals仅原题文字重练/净题图；archive仅私有错题留档，不生成学生ZIP/答案册。无材料时先核图补齐kind=original_text或variant的练习、独立答案及验算/复核；不能把变式冒充原题。include_drafts仅供明确的缺题/待复核讨论草稿；返回student_materials按记录、题目数与意图逐项对账。导出本地可打印HTML错题本、学生变式题册与独立答案册及原卷证据图；有历史作答时另附feedback.html反馈报告（最近20次）。选了clean_evidence_ids时额外输出original-practice.html原题重练册。practice_bundle_path是仅练习材料的ZIP，含练习页、所选净题图与离线资源，不含答案册/错题本/原卷图；给学生材料时使用此包并完整解压，不要复制含答案的整个导出目录。题干与净题图仍需检查提示残留。默认只导出用户纳入、练习有适用验算/用户复核、净题已按当前图片复核的记录；先read_study_record查看exercise_validation和clean_copy_validation。include_drafts允许带待复核标记的草稿。证据明细在manifest_path。完整导出目录供留档，含答案和原作答。不会自动发布或发送。"""
+    return ctx.request_context.lifespan_context.export_errorbook(record_ids, include_drafts, practice_scope)
 
 
 def main():

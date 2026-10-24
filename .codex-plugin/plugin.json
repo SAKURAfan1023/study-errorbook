@@ -1,6 +1,6 @@
 {
   "name": "study-errorbook",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TextIn 文档证据与学习错题工具：供 Agent 解析、取证、归因、练习和导出。",
   "author": {
     "name": "SAKURAfan1023"

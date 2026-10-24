@@ -1,5 +1,16 @@
 ## 输出
 
+## 逐题补全再导出
+
+用户要学生材料时，先明确原题/变式范围：practice_scope=originals只导出原题文字重练及已复核净题图；variants只导出变式；all导出所选题已有的学生材料。用户明确只留档用practice_scope=archive，仅生成私有错题本/历史反馈，不生成空学生ZIP；student_materials.requested=false且complete=null。每条选中记录必须覆盖，不能用一题的多个变式抵另一题缺失，也不能拿变式冒充原题。
+
+1. 逐题read_study_record，查看exercises及其kind、exercise_validation、clean_copy_validation。没有可用学生材料的题先补齐，不先生成少题包。跨页题保持同一记录及全部证据。
+2. 无练习/净题图但原题文字已由完整原图核实（例如代数Q4）时，补一条kind=original_text：prompt必须与当前record.stem完全一致，answer和explanation独立保存，不把原作答或诊断写进题面。按真实题意计算并用check_exercise做适用检查，答案字符串与proposed_answer一致。用户明确要新变式则kind=variant。涉及未补齐的图形、表格或条件时先补材料/询问范围，不能臆造或自动调用付费擦除。
+3. 用当前完整record及revision保存，保留所有原证据、作答、分析及历史。按工具返回完成所需复核；只转述用户已有明确意见，不代填新的人工作答或答案确认。原题核心改动时旧练习失效，须重新核实。
+4. 正式export_errorbook缺题会返回student_material_missing且不创建少题成品。补全后按原范围重试；不改为include_drafts来掩盖缺项。include_drafts仅供用户明确要求讨论草稿，缺题时contains_drafts=true且student_materials.complete=false，不是完成交付。
+5. 交付前核对student_materials：selected_record_count=covered_record_count、missing_record_ids为空，逐record的原题/变式及真实题目数与实际HTML相符。核对学生ZIP清单和题面；答案册独立且对应同一资料编号。ZIP资源文件数不是题目数。
+
+
 擦除调用返回的provider_receipt供反馈定位：request_ids保留响应头标识，x_request_id来自响应体，两者不相互冒充；version只是接口返回版本。response_saved=true时可按response_path查看本地响应文件，response_sha256对应实际归档字节；credential_echo_redacted=true表示已遮盖凭据回显，不能称为完全未修改的原始响应。文件可能含图片base64，不要整段贴入对话。旧缓存或失败调用可能缺少标识/响应，不猜填，也不为补齐记录重复付费提交。receipt只证明调用与归档状态，不证明擦除质量，仍须核对题干损伤和作答残留。
 
 正式导出前用 `read_study_record` 查看exercise_validation。每道练习需要适用表达式验算通过，或本版本用户明确复核。表达式通过仍不证明自然语言题意匹配；没有用户意见时不得代填人工确认。未就绪内容可include_drafts=true导出讨论，contains_drafts标识是否含待复核内容。

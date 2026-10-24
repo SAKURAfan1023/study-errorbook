@@ -12,10 +12,10 @@ description: 用 TextIn 解析试卷或作业，在保留原作答和批改证�
 用户只需说「整理作业」「开始重练」「导出材料」，不要让用户选择工具或理解调用链。默认先完成1–3页代数作业中的一题，明确其余题的待定/跳过状态；VLM、付费净题擦除、日期计划只在用户需要时展开，底层工具保持兼容。
 
 - **整理作业**：按已有授权导入 → 必要脱敏 → 找已有任务/缓存（没有缓存才在明确上传授权与页数预算内解析）→ 先看整页再局部核图 → `read_task_progress` / `update_document_coverage` 保存所见题号 → 保存草稿、解释可观察错因并生成变式 → 适用验算与用户复核。每页清点引用整页证据；题号不能从OCR元素顺序推断。关联记录后，已处理/待定随当前复核状态派生；跳过必须写明理由。未清点页、未关联记录或待定题存在时，只报告实际已整理范围，不能宣称整份完成。
-- **开始重练**：使用用户已选择题目的 `read_practice_prompt` 只展示中性题面；不要先展示进度中的自由标签、题库、原卷或答案。没有已选题时先让用户选范围，再取中性题面。收到真实作答后 `record_practice` 保留帮助情况，再读历史快照进行反馈，`review_practice_attempt` 保存判断、依据和下一步；不能自动把一次答对当掌握。
-- **导出材料**：核对当前题目/答案检查后 `export_errorbook`，交付 `practice_bundle_path` 无答案学生ZIP和独立 `answers.html`。已有作答时 `feedback.html` 单独提供反馈。完整目录只作留档，含答案与原卷，不能整目录交给学生。没有生成PDF就明确是离线可打印HTML。
+- **开始重练**：使用用户已选择题目的 `read_practice_prompt` 只展示中性题面；不要先展示进度中的自由标签、题库、原卷或答案。没有已选题时先让用户选范围；已有变式用query_errorbook(ready_exercises_only=true, exercise_kind="variant")找可用题和真实下标，再取中性题面，不猜exercise_index=0。收到真实作答后 `record_practice` 保留帮助情况，再读历史快照进行反馈，`review_practice_attempt` 保存判断、依据和下一步；不能自动把一次答对当掌握。
+- **导出材料**：逐条核对用户所选范围与原题/变式意图。缺学生材料时先按[导出补全流程](references/exports.md#逐题补全再导出)补齐，不能只交付现有的一部分。核对当前题目/答案检查后 `export_errorbook`，确认student_materials.complete=true且covered_record_count等于所选记录数，再交付 `practice_bundle_path` 无答案学生ZIP和独立 `answers.html`。已有作答时 `feedback.html` 单独提供反馈。完整目录只作留档，含答案与原卷，不能整目录交给学生。没有生成PDF就明确是离线可打印HTML。
 
-跨会话先 `list_documents` 找回材料，`read_task_progress(document_id)` 获取题号清点与下一步；`list_parse_jobs` 找回既有识别。先继续已有任务，不通过新上传找回进度。每次阶段交付用自然语言说明“已处理几题、待定几题、跳过几题、未清点几页、下一步”。`processed` 仅代表用户已纳入或排除，不代表所有后续练习已完成。
+跨会话先 `list_documents`（limit不超过50）找回材料，`read_task_progress(document_id)` 获取题号清点与下一步；`list_parse_jobs` 找回既有识别。先继续已有任务，不通过新上传找回进度。每次阶段交付用自然语言说明“已处理几题、待定几题、跳过几题、未清点几页、下一步”。`processed` 仅代表用户已纳入或排除，不代表所有后续练习已完成。
 
 ## 按任务读取
 
@@ -42,3 +42,5 @@ description: 用 TextIn 解析试卷或作业，在保留原作答和批改证�
 ## 向用户交付
 
 说明材料与题目范围、确定和待确认项、主要判断的证据入口、针对性练习及导出位置。区分OCR结果、Agent推断、用户意见与工具验算，不报告未经验证的准确率或学习效果。排查升级时用workspace_status.runtime_version核对安装构建，再验证实际行为；新Skill、工具数量或基础版本号均不能单独证明当前连接已更新。
+
+参数要点：跳过项只填skip_reason并省略record_id，原草稿可保留。反馈没有用户明确自判时保留user_verdict=unreported并省略user_note；模拟来源写进feedback或response。分页按工具schema上限与next_offset继续，不猜大limit。

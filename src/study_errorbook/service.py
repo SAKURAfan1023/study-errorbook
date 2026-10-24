@@ -359,6 +359,8 @@ class Workspace:
             "free_parse_note": "free_sync需显式选择，也会上传材料；限10MiB，60秒内未返回不自动重试。擦除仍需凭据。",
             "input_root": str(self.input_root) if self.input_root else None,
             "data_dir": str(self.root),
+            "exports_dir": str(self.root / "exports"),
+            "client_profile": os.environ.get("STUDY_CLIENT_PROFILE", "default"),
             "limits": {"bytes": MAX_BYTES, "pages": 20},
             "automatic_grading": False,
             "concurrency": "同机多会话共享；本地写入事务保护，远端调用按任务互斥。不要将数据库放在网络盘。",
@@ -1656,6 +1658,8 @@ class Workspace:
                 raise DomainError("clean_unavailable", "净题图尚未生成成功，不能关联用于重练。")
         checks = []
         for exercise in record.exercises:
+            if exercise.kind == "original_text" and exercise.prompt != record.stem:
+                raise DomainError("original_prompt_mismatch", "原题文字重练的prompt必须与当前stem完全一致；不能用变式顶替原题。")
             if exercise.check_id:
                 check = self._get("check", exercise.check_id)
                 if check["proposed_answer"] != exercise.answer:
@@ -1803,7 +1807,11 @@ class Workspace:
             if not 0 <= exercise_index < len(validation) or not validation[exercise_index]["answer_ready"]:
                 raise DomainError("exercise_not_ready", "变式不存在或答案检查未通过；先核对该练习。")
             result["prompt"] = record["exercises"][exercise_index]["prompt"]
-            result["material_note"] = "已登记的变式题干；表达式验算或用户复核不保证全部题意及配图完整。"
+            if record["exercises"][exercise_index].get("kind") == "original_text":
+                result["display_label"] = "原题文字重练"
+            result["material_note"] = ("已登记的原题文字题面，不含原卷作答图；仍需核对条件/配图完整。"
+                                       if record["exercises"][exercise_index].get("kind") == "original_text"
+                                       else "已登记的变式题干；表达式验算或用户复核不保证全部题意及配图完整。")
         elif presentation == "text":
             result["prompt"] = record["stem"]
             result["material_note"] = "仅转录文本，不含原卷图片；涉及图形、表格或缺失条件时先取得完整净题材料。"
@@ -2014,8 +2022,13 @@ class Workspace:
         self, search: str = "", offset: int = 0, limit: int = 20, *,
         review_status: str | None = None, subject: str | None = None,
         document_id: str | None = None, knowledge_point: str | None = None,
-        agent_verdict: str | None = None,
+        agent_verdict: str | None = None, ready_exercises_only: bool = False,
+        exercise_kind: str | None = None,
     ) -> dict:
+        if exercise_kind is not None and exercise_kind not in {"variant", "original_text"}:
+            raise DomainError("invalid_search_filter", "exercise_kind使用variant/original_text；省略不区分。")
+        if type(ready_exercises_only) is not bool:
+            raise DomainError("invalid_search_filter", "ready_exercises_only必须为布尔值。")
         if type(offset) is not int or type(limit) is not int:
             raise DomainError("pagination", "offset和limit必须为整数。")
         self._page_bounds(offset, limit)
@@ -2048,6 +2061,14 @@ class Workspace:
             for (body,) in rows:
                 saved = json.loads(body)
                 record = saved["record"]
+                if exercise_kind is not None and not any(exercise.get("kind", "variant") == exercise_kind for exercise in record["exercises"]):
+                    continue
+                ready_exercises = [{"exercise_index": item["exercise_index"],
+                                    "kind": record["exercises"][item["exercise_index"]].get("kind", "variant")}
+                                   for item in self._exercise_validation(saved)
+                                   if item["answer_ready"] and (exercise_kind is None or record["exercises"][item["exercise_index"]].get("kind", "variant") == exercise_kind)] if ready_exercises_only else []
+                if ready_exercises_only and (saved["review_status"] != "include" or not ready_exercises):
+                    continue
                 if needle and not any(needle in value.casefold() for value in _record_search_values(record)):
                     continue
                 if total >= offset and len(summaries) < limit and not page_full:
@@ -2056,6 +2077,8 @@ class Workspace:
                                "document_id": record["document_id"], "question_label": record["question_label"],
                                "subject": record["subject"], "stem_preview": record["stem"][:300],
                                "agent_verdict": record["agent_verdict"]}
+                    if ready_exercises_only:
+                        summary["ready_exercises"] = ready_exercises
                     size = len(json.dumps(summary, ensure_ascii=False).encode("utf-8"))
                     # Keep a contiguous page: never skip a large item to fit a later small one.
                     if used_bytes + size > 12000:
@@ -2070,7 +2093,7 @@ class Workspace:
                 "next_offset": offset + len(summaries) if offset + len(summaries) < total else None,
                 "filters": {"review_status": review_status, "subject": subject,
                             "document_id": document_id, "knowledge_point": knowledge_point,
-                            "agent_verdict": agent_verdict},
+                            "agent_verdict": agent_verdict, "ready_exercises_only": ready_exercises_only, "exercise_kind": exercise_kind},
                 "note": "关键词为不区分大小写的字面子串，查当前题干/作答/批注/分析/练习文本，不查内部字段名、ID或历史反馈。筛选条件精确匹配并取交集；默认含全部复核状态。每页不超过limit且摘要项JSON合计不超过12000个UTF-8字节，少于limit也可能还有结果，按next_offset继续。按首次保存顺序倒序；翻页期间数据变动须刷新首页。题干摘要可能含提示，不是独立重练界面。"}
 
     @_write_transaction
@@ -2339,10 +2362,19 @@ class Workspace:
                 "unresolved_document_id": current if status != "complete_saved_chain" else None,
                 "scope": "仅导出已保存的来源关系；未校验父文件当前内容，不附父页或完整原文件。导入哈希与规范化父源哈希语义不同，不能直接比较。遮盖仅保留派生关系，不附遮盖区域列表。最多16层，未到导入来源时明确标记不完整。"}
 
-    def export_errorbook(self, record_ids: list[str], include_drafts: bool = False) -> dict:
+    def export_errorbook(
+        self, record_ids: list[str], include_drafts: bool = False, practice_scope: str = "all",
+    ) -> dict:
         if not 1 <= len(record_ids) <= 50 or len(set(record_ids)) != len(record_ids):
             raise DomainError("export_size", "一次导出 1–50 条不重复记录。")
+        if practice_scope not in {"all", "variants", "originals", "archive"}:
+            raise DomainError("invalid_export_scope", "practice_scope使用all/variants/originals/archive。")
         records = [self._get("record", identifier) for identifier in record_ids]
+        selected_exercises = {record["id"]: [
+            (index, exercise) for index, exercise in enumerate(record["record"]["exercises"])
+            if practice_scope == "all" or (practice_scope == "variants" and exercise.get("kind", "variant") == "variant")
+            or (practice_scope == "originals" and exercise.get("kind") == "original_text")
+        ] for record in records}
         if any(r["review_status"] == "exclude" for r in records):
             raise DomainError("excluded_record", "选中记录包含用户排除的题目。")
         if not include_drafts and any(r["review_status"] != "include" for r in records):
@@ -2352,8 +2384,8 @@ class Workspace:
         validation_by_record = {record["id"]: self._exercise_validation(record) for record in records}
         not_ready = [
             (record["id"], item["exercise_index"])
-            for record in records for item in validation_by_record[record["id"]]
-            if not item["answer_ready"]
+            for record in records for index, _ in selected_exercises[record["id"]]
+            if not (item := validation_by_record[record["id"]][index])["answer_ready"]
         ]
         if not include_drafts and not_ready:
             examples = "、".join(f"{identifier}练习{index + 1}" for identifier, index in not_ready[:5])
@@ -2361,13 +2393,38 @@ class Workspace:
                 "exercise_not_ready",
                 f"{examples} 尚未通过适用检查或用户明确复核；read_study_record查看状态，修订/复核后正式导出，或选择草稿。",
             )
-        clean_by_record = {record["id"]: self._clean_copy_validation(record) for record in records}
+        clean_by_record = {record["id"]: self._clean_copy_validation(record) if practice_scope not in {"variants", "archive"} else [] for record in records}
+        coverage = [{"record_id": record["id"], "source_revision": record["revision"], "display_number": number,
+                     "exercise_indices": [index for index, _ in selected_exercises[record["id"]]],
+                     "text_question_count": len(selected_exercises[record["id"]]),
+                     "variant_question_count": sum(exercise.get("kind", "variant") == "variant" for _, exercise in selected_exercises[record["id"]]),
+                     "original_text_question_count": sum(exercise.get("kind") == "original_text" for _, exercise in selected_exercises[record["id"]]),
+                     "original_image_question_count": int(bool(clean_by_record[record["id"]])),
+                     "student_files": (["practice.html"] if selected_exercises[record["id"]] else []) + (["original-practice.html"] if clean_by_record[record["id"]] else []),
+                     "answer_files": ["answers.html"] if selected_exercises[record["id"]] else []}
+                    for number, record in enumerate(records, 1)]
+        missing = [item for item in coverage if not item["text_question_count"] and not item["original_image_question_count"]] if practice_scope != "archive" else []
+        if missing and not include_drafts:
+            examples = "、".join(item["record_id"] for item in missing[:5])
+            raise DomainError(
+                "student_material_missing",
+                f"{examples} 缺少所选范围的学生题面；未创建少题导出。先read_study_record核对原图，补充kind=original_text的完整原题文字练习或kind=variant的变式，答案独立保存并验算/复核，再重新导出。原题范围不能用变式顶替；图表不全则先补材料，不自动上传或擦除。",
+            )
+        student_materials = {"practice_scope": practice_scope, "requested": practice_scope != "archive",
+                             "complete": not missing if practice_scope != "archive" else None,
+                             "selected_record_count": len(records), "covered_record_count": len(records) - len(missing) if practice_scope != "archive" else 0,
+                             "text_question_count": sum(item["text_question_count"] for item in coverage),
+                             "variant_question_count": sum(item["variant_question_count"] for item in coverage),
+                             "original_text_question_count": sum(item["original_text_question_count"] for item in coverage),
+                             "answer_question_count": sum(item["text_question_count"] for item in coverage),
+                             "original_image_question_count": sum(item["original_image_question_count"] for item in coverage),
+                             "missing_record_ids": [item["record_id"] for item in missing], "records": coverage}
         clean_items = [item for items in clean_by_record.values() for item in items]
         if any(item["status"] == "unavailable" for item in clean_items):
             raise DomainError("clean_unavailable", "所选净题图不可读取，请检查本地文件或修订净题选择。")
         if not include_drafts and any(not item["ready"] for item in clean_items):
             raise DomainError("clean_not_ready", "所选净题图尚未按当前版本/图片复核；先对照原图复核，或明确导出草稿。")
-        contains_drafts = bool(not_ready) or any(not item["ready"] for item in clean_items) or any(record["review_status"] != "include" for record in records)
+        contains_drafts = bool(missing) or bool(not_ready) or any(not item["ready"] for item in clean_items) or any(record["review_status"] != "include" for record in records)
         export_id = "export_" + uuid.uuid4().hex
         exports_root = self.root / "exports"
         if exports_root.is_symlink():
@@ -2389,6 +2446,10 @@ class Workspace:
             escaped = html.escape
             shutil.copytree(Path(__file__).parent / "assets", folder / "assets")
             notebook, practice, answers, original_practice, exported_records, feedback_sections = [], [], [], [], [], []
+            if missing:
+                warning = "缺题草稿：所选第" + "、".join(str(item["display_number"]) for item in missing) + "条记录尚无本范围学生题面，不能当成完整题册。"
+                practice.append('<p class="status">' + html.escape(warning) + "</p>")
+                answers.append('<p class="status">' + html.escape(warning) + "</p>")
             for record_index, saved in enumerate(records, 1):
                 item = saved["record"]
                 provenance = self._export_document_provenance(item["document_id"])
@@ -2538,9 +2599,10 @@ class Workspace:
                     feedback_sections.append('</section>')
                 if history["next_before"] is not None:
                     feedback_sections.append('<p class="status">本报告仅展示最近20次作答；完整历史保留在本地。</p>')
-                for index, exercise in enumerate(item["exercises"], 1):
-                    label = f"{display_label} / 练习 {index}"
-                    validation = validation_by_record[saved["id"]][index - 1]
+                for index, (source_index, exercise) in enumerate(selected_exercises[saved["id"]], 1):
+                    kind_label = "原题文字重练" if exercise.get("kind") == "original_text" else "练习"
+                    label = f"{display_label} / {kind_label} {index}"
+                    validation = validation_by_record[saved["id"]][source_index]
                     exercise_label = review_label
                     if not validation["answer_ready"]:
                         exercise_label += " · " + ("答案验算未通过（草稿）" if validation["status"] == "not_equivalent" else "答案待复核（草稿）")
@@ -2568,9 +2630,11 @@ class Workspace:
                     answers.append(f"<p class='subtitle'>{check_note}</p></section>")
             pages = [
                 ("errorbook.html", "错题本", notebook),
-                ("practice.html", "变式练习", practice),
+                ("practice.html", "练习题册" if any(exercise.get("kind") == "original_text" for items in selected_exercises.values() for _, exercise in items) else "变式练习", practice),
                 ("answers.html", "练习答案", answers),
             ]
+            if practice_scope == "archive":
+                pages = pages[:1]
             if original_practice:
                 pages.append(("original-practice.html", "原题重练", original_practice))
             if feedback_sections:
@@ -2598,22 +2662,24 @@ class Workspace:
             practice_files.update(clean["file"] for record in exported_records for clean in record["clean_copies"])
             practice_files.update(path.relative_to(folder).as_posix() for path in (folder / "assets").rglob("*") if path.is_file())
             bundle_name = "practice-only.zip"
-            with zipfile.ZipFile(folder / bundle_name, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-                for filename in sorted(practice_files):
-                    bundle.write(folder / filename, arcname=filename)
-                bundle.writestr("README.txt", f"练习材料\n资料编号：{export_id}\n核对答案时请使用相同编号的答案册。\n"
-                                "请先完整解压，再打开practice.html；如有original-practice.html，可打开原题重练。\n"
-                                "保留assets目录和图片。本包不附答案册、错题本或原卷作答图；题干与净题图仍需检查提示残留。\n"
-                                + ("本包含待复核草稿，请核对各题状态后使用。\n" if contains_drafts else "请按各题复核状态使用。\n"))
-            with (folder / bundle_name).open("rb") as stream:
-                bundle_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            if practice_scope != "archive":
+                with zipfile.ZipFile(folder / bundle_name, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                    for filename in sorted(practice_files):
+                        bundle.write(folder / filename, arcname=filename)
+                    bundle.writestr("README.txt", f"练习材料\n资料编号：{export_id}\n核对答案时请使用相同编号的答案册。\n"
+                                    "请先完整解压，再打开practice.html；如有original-practice.html，可打开原题重练。\n"
+                                    "保留assets目录和图片。本包不附答案册、错题本或原卷作答图；题干与净题图仍需检查提示残留。\n"
+                                    + ("本包含待复核草稿，请核对各题状态后使用。\n" if contains_drafts else "请按各题复核状态使用。\n"))
+                with (folder / bundle_name).open("rb") as stream:
+                    bundle_digest = hashlib.file_digest(stream, "sha256").hexdigest()
             manifest = {
                 "export_id": export_id,
                 "math_renderer": "KaTeX 0.18.9 (offline assets)",
                 "contains_drafts": contains_drafts,
+                "student_materials": student_materials,
                 "records": exported_records,
                 "practice_bundle": {"file": bundle_name, "sha256": bundle_digest, "file_count": len(practice_files) + 1,
-                                    "scope": "仅练习页、所选净题图和离线资源；不保证题干或净题图无提示残留。"},
+                                    "scope": "仅练习页、所选净题图和离线资源；不保证题干或净题图无提示残留。"} if practice_scope != "archive" else None,
             }
             manifest_temp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
             manifest_temp.replace(folder / "manifest.json")
@@ -2627,7 +2693,7 @@ class Workspace:
             "records": [{"id": record["id"], "revision": record["revision"]} for record in records],
             "manifest_path": str(folder / "manifest.json"),
             "folder": str(folder),
-            "practice_bundle_path": str(folder / bundle_name),
+            "practice_bundle_path": str(folder / bundle_name) if practice_scope != "archive" else None,
             "files": [str(folder / filename) for filename, _, _ in pages],
             "format": "printable_html",
             "pdf_status": "可使用浏览器打印为PDF；未自动生成PDF。",

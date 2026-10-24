@@ -2,7 +2,7 @@
   "mcpServers": {
     "study-errorbook": {
       "command": "npx",
-      "args": ["--yes", "study-errorbook@0.1.0", "serve"]
+      "args": ["--yes", "study-errorbook@0.1.1", "serve"]
     }
   }
 }

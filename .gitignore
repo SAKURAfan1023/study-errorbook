@@ -53,3 +53,5 @@ tmp/
 /npm-client/LICENSE
 /npm-client/THIRD_PARTY_NOTICES.md
 /npm-client/node_modules/
+
+!/docs/iteration-0.1.1.md

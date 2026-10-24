@@ -6,7 +6,7 @@
       "command": "npx",
       "args": [
         "--yes",
-        "study-errorbook@0.1.0",
+        "study-errorbook@0.1.1",
         "serve"
       ]
     }
