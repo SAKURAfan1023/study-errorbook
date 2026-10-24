@@ -40,7 +40,7 @@ async function options() {
 async function payload() {
   const manifest=JSON.parse(await fs.readFile(path.join(packageRoot,'runtime/manifest.json'),'utf8'));
   for(const [relative,digest] of Object.entries(manifest.files)) {
-    if(path.isAbsolute(relative)||relative.split('/').some(p=>p==='..')||!['bin/','runtime/','skills/','.codex-plugin/','package.json'].some(p=>relative.startsWith(p))) throw new Error('运行包文件清单无效。');
+    if(path.isAbsolute(relative)||relative.split('/').some(p=>p==='..')||!['bin/','runtime/','skills/','.codex-plugin/','package.json','plugin.json','mcp.json'].some(p=>relative.startsWith(p))) throw new Error('运行包文件清单无效。');
     const file=path.join(packageRoot,relative);
     if(!(await exists(file))||(await fs.lstat(file)).isSymbolicLink()||sha(await fs.readFile(file))!==digest) throw new Error(`运行包校验失败：${relative}。请重新安装同一版本。`);
   }

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "study-errorbook": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "study-errorbook@0.1.0",
+        "serve"
+      ]
+    }
+  }
+}

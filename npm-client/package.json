@@ -23,7 +23,9 @@
     "skills/",
     ".codex-plugin/plugin.json",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "plugin.json",
+    "mcp.json"
   ],
   "scripts": {
     "build": "python3 ../scripts/build_npm_client.py",

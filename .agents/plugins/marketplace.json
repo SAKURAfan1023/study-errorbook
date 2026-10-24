@@ -1,0 +1,22 @@
+{
+  "name": "study-errorbook",
+  "interface": {
+    "displayName": "学习错题"
+  },
+  "plugins": [
+    {
+      "name": "study-errorbook",
+      "source": {
+        "source": "npm",
+        "package": "study-errorbook",
+        "version": "0.1.0",
+        "registry": "https://registry.npmjs.org"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

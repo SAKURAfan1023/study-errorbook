@@ -8,7 +8,7 @@
 
 ## npm 本地 client（待发布）
 
-已确认公开包名 `study-errorbook`，本轮使用薄Node启动器自动管理隔离Python核心，用户无需解压ZIP或手动配Python。首次需联网下载固定运行时；使用说明、缓存/数据边界及宿主接入限制见 [npm client](npm-client/README.md)。本地tarball验收与公开发布是两个状态，未认证时不会宣称已发布。
+已确认公开包名 `study-errorbook`，本轮使用薄Node启动器自动管理隔离Python核心，用户无需解压ZIP或手动配Python。首次需联网下载固定运行时；使用说明、缓存/数据边界及宿主接入限制见 [npm client](npm-client/README.md)。仓库市场入口为 `.agents/plugins/marketplace.json`，npm包携带标准插件与固定版本npx启动配置；本地已有仓库时运行 `node scripts/plugin_link.mjs` 取得详情链接，无需复制MCP JSON。npm未发布、桌面窗口未实测，不能宣称快装已通过。
 
 ## 三句话开始
 

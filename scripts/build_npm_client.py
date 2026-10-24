@@ -39,7 +39,7 @@ def main():
         shutil.copy2(root / name, client / name)
     pins = json.loads((client / 'uv-assets.json').read_text())
     wheel = next(payload.glob('*.whl'))
-    include = [client / 'package.json', client / 'bin/client.mjs', *payload.iterdir()]
+    include = [client / 'package.json', client / 'plugin.json', client / 'mcp.json', client / 'bin/client.mjs', *payload.iterdir()]
     include += [p for name in ('skills', '.codex-plugin') for p in (client / name).rglob('*') if p.is_file()]
     files = {p.relative_to(client).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(include)}
     manifest = {'schema': 1, 'runtime_version': runtime_version, 'wheel': wheel.name, 'python_version': '3.12.14', 'uv': pins, 'files': files}

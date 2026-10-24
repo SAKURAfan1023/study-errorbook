@@ -13,16 +13,16 @@
 
 ## npm 本地 client
 
-公开目标为 `study-errorbook@0.1.0`，尚未发布。使用薄 Node 启动器，自动准备固定且校验过的 uv、私有 Python 与锁定依赖，保留现有 Python 核心。数据与配置独立于 npm 缓存。用户无需解压 ZIP 或手写 Python 路径，仍需 Node 22+/npm 和支持本地 stdio 的宿主。
+公开目标为 `study-errorbook@0.1.0`，尚未发布。使用薄 Node 启动器，自动准备固定且校验过的 uv、私有 Python 与锁定依赖，保留现有 Python 核心。数据与配置独立于 npm 缓存。用户无需解压 ZIP 或手写 Python 路径，仍需 Node 22+/npm 和支持本地 stdio 的宿主。补齐 `.agents/plugins/marketplace.json` 的固定npm源、包内标准 `plugin.json`/`mcp.json` 与 `scripts/plugin_link.mjs`：窗口路径不要求复制MCP配置；npm发布和桌面窗口仍待验收。
 
 源码与步骤：[npm client](npm-client/README.md)、[构建](scripts/build_npm_client.py)、[隔离验收](scripts/verify_npm_client.mjs)、[Node 回归](npm-client/test/client.test.mjs)、[输入目录回归](tests/test_client_input_default.py)。
 
 ## 已完成的验证
 
-- Python 全量：561 passed；lint 通过。Node 回归：5 passed。
+- Python 全量：561 passed；lint 通过。Node 回归：6 passed。
 - 在 PATH 不含 Python/uv 的干净环境安装本地 npm tarball，真实下载私有运行时，通过 35 工具 stdio 合成闭环。
 - 移走 npm 安装目录后，从生成的稳定配置离线启动通过，测试数据保留。
-- tarball 及内层 wheel 审计通过：16 文件，1,101,063 字节；未发现凭据、真实材料、数据库或机器路径。
+- tarball 及内层 wheel 审计通过：18 文件，1,102,378 字节；未发现凭据、真实材料、数据库或机器路径。
 - npm publish dry-run 通过，实际发布仍因 ENEEDAUTH 等待发布者自己完成浏览器登录。
 - 合成导出的桌面、390px 窄屏、打印和学生 ZIP 离线资源已实际检查；截图来自前一轮 MVP，未将模拟结果当真实 OCR 质量。
 
@@ -37,8 +37,10 @@
 - `output/contest-mvp-20261023/验收记录.md`
 - `output/contest-mvp-20261023/screenshots/`
 
-npm tarball SHA256：`418bd007efc3b7cacb5a0477ad319f66cebfd2efe204d5af99640d14a6de0d8c`。
+npm tarball SHA256：`31c12df09576982336e89c56d096c5c5ce4eea6d48c8cf532268be0a0dd15cf3`。
 
 ## 未验证边界
 
 实际运行环境为 macOS arm64 / Node 24.21.0。macOS Intel 和 Linux glibc 尚未实机验证，原生 Windows 不支持。ChatGPT 原生安装窗口未验收，未更改现有宿主连接。真实 TextIn 识别、线上恢复与限流、擦除质量及真实学习效果均不在本轮合成验收结论内。
+
+源码已非force推送至 `origin/contest-mvp-20261023`，main未改动。仓库尚无GitHub Actions工作流，以上为实际本地验收，不声称远端CI通过。
